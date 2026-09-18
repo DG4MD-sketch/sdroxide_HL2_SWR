@@ -4978,8 +4978,12 @@ something:
   the speed: two aircraft with equal leaders are going equally fast, at any zoom.
   It bends when the aircraft is turning.
 - **The data block** beside it is the callsign, the altitude and the speed — the
-  order every radar display in the world puts them in. On a crowded picture only
-  the selected and hovered targets keep theirs.
+  order every radar display in the world puts them in. It sits up and to the
+  right, or at another corner where the edge of the map or a neighbour is in
+  the way. On a crowded picture a block with no room anywhere is left off rather
+  than drawn over another block or target — aircraft on the ground give way
+  first — while the selected target, the one under the pointer and any squawking
+  an emergency always keep theirs.
 
 Drag to pan, scroll to zoom, double-click to reframe. Your own position is
 marked once **My grid** is set.
