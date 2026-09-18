@@ -1125,5 +1125,4 @@ pub enum Command {
     ResetModeDefaults {
         mode: Option<Mode>,
     },
-
 }

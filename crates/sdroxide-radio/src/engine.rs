@@ -12603,8 +12603,8 @@ impl Engine {
         // change: `set_rx_mode` also runs when a rig reports the mode it is
         // already in, and a profile re-applied then would overwrite the tweak
         // the operator just made.
-        let profile = (self.state.rx[rx.index()].mode != mode)
-            .then(|| self.mode_profiles.effective(mode));
+        let profile =
+            (self.state.rx[rx.index()].mode != mode).then(|| self.mode_profiles.effective(mode));
         let r = &mut self.state.rx[rx.index()];
         r.mode = mode;
         if let Some(profile) = profile {

@@ -13,9 +13,7 @@ use std::time::{Duration, Instant};
 use sdroxide_radio::{
     AudioParams, Complex32, EngineConfig, EngineHandles, IqSource, Result, rtrb, start_engine,
 };
-use sdroxide_types::{
-    AgcMode, Command, DeviceCaps, Mode, NrLevel, RadioEvent, RadioState, RxId,
-};
+use sdroxide_types::{AgcMode, Command, DeviceCaps, Mode, NrLevel, RadioEvent, RadioState, RxId};
 
 const RATE: f64 = 48_000.0;
 const DIAL: f64 = 14_074_000.0;
@@ -99,11 +97,7 @@ fn stop(mut h: EngineHandles) {
 }
 
 /// Wait for a state that satisfies `f`, or say what the last one was.
-fn wait_for(
-    h: &EngineHandles,
-    what: &str,
-    f: impl Fn(&RadioState) -> bool,
-) -> RadioState {
+fn wait_for(h: &EngineHandles, what: &str, f: impl Fn(&RadioState) -> bool) -> RadioState {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut last: Option<RadioState> = None;
     while Instant::now() < deadline {
@@ -117,7 +111,10 @@ fn wait_for(
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    panic!("the state never showed {what}; last: {:?}", last.map(|s| (s.rx[0].mode, s.rx[0].noise_reduction, s.rx[0].agc)));
+    panic!(
+        "the state never showed {what}; last: {:?}",
+        last.map(|s| (s.rx[0].mode, s.rx[0].noise_reduction, s.rx[0].agc))
+    );
 }
 
 fn send(h: &EngineHandles, c: Command) {

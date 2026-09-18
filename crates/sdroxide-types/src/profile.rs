@@ -221,7 +221,8 @@ mod tests {
 
     #[test]
     fn a_profile_laid_over_the_defaults_keeps_only_its_own_fields() {
-        let base = ModeProfile { agc: Some(AgcMode::Med), binaural: Some(false), ..Default::default() };
+        let base =
+            ModeProfile { agc: Some(AgcMode::Med), binaural: Some(false), ..Default::default() };
         let over = ModeProfile { agc: Some(AgcMode::Slow), ..Default::default() };
         let effective = over.over(base);
         assert_eq!(effective.agc, Some(AgcMode::Slow));
@@ -255,7 +256,10 @@ mod tests {
     fn stored_overrides_are_laid_over_the_mode_defaults() {
         let mut profiles = ModeProfiles::default();
         assert_eq!(profiles.effective(Mode::Usb), Mode::Usb.default_profile());
-        profiles.set(Mode::Usb, ModeProfile { noise_reduction: Some(NrLevel::Off), ..Default::default() });
+        profiles.set(
+            Mode::Usb,
+            ModeProfile { noise_reduction: Some(NrLevel::Off), ..Default::default() },
+        );
         let effective = profiles.effective(Mode::Usb);
         assert_eq!(effective.noise_reduction, Some(NrLevel::Off));
         // The defaults still answer for everything the override is silent on.
