@@ -503,6 +503,15 @@ pub(crate) fn rx_thread(mut conn: Connection, shared: Arc<Shared>, mut ring: Pro
             // longer makes sense — is this connection being finished, which is
             // not the same as the radio being finished. Replace it in place.
             Err(e) => {
+                // Unless it was finished on purpose. `release` shuts this
+                // socket down to break the read it is blocked in, and from
+                // here that is indistinguishable from the far end hanging up —
+                // "the server closed the connection with N bytes still due".
+                // Reported as a fault and redialled, it made the end of every
+                // `probe` run read as `iiod` crashing (issue #470).
+                if !shared.alive.load(Ordering::Relaxed) {
+                    break;
+                }
                 if blind_redials >= MAX_BLIND_REDIALS {
                     shared.die("the receive stream", &e);
                     break;

@@ -60,7 +60,10 @@ const CONTEXT_XML: &str = r#"<?xml version="1.0" encoding="utf-8"?>
       <attribute name="frequency_available" filename="out_altvoltage1_TX_LO_frequency_available" />
     </channel>
     <attribute name="ensm_mode" filename="ensm_mode" />
+    <attribute name="ensm_mode_available" filename="ensm_mode_available" />
     <debug-attribute name="adi,frequency-division-duplex-mode-enable" />
+    <debug-attribute name="adi,frequency-division-duplex-independent-mode-enable" />
+    <debug-attribute name="adi,ensm-enable-txnrx-control-enable" />
     <debug-attribute name="adi,gpo0-slave-rx-enable" />
     <debug-attribute name="adi,gpo0-slave-tx-enable" />
     <debug-attribute name="adi,gpo1-slave-rx-enable" />
@@ -348,8 +351,47 @@ fn default_attr(key: &str) -> &'static str {
         // How a Pluto boots: transmit and receive enabled together, which is
         // what makes full duplex a question about the link rather than about
         // the part.
+        //
+        // This is the state machine's *state*, as the driver reads it back
+        // from the part — `fdd`, `rx`, `tx`, `alert`, `sleep` — and never the
+        // word `tdd`, which this fixture used to serve and which no AD9361 can
+        // say. The *mode* is `FDD_PROPERTY`, and `ensm_mode_available` below.
         "ad9361-phy/ensm_mode" => "fdd",
+        FDD_PROPERTY => "1",
         _ => "0",
+    }
+}
+
+/// The device-tree property that decides whether the part is in FDD or TDD.
+const FDD_PROPERTY: &str = "ad9361-phy/DEBUG/adi,frequency-division-duplex-mode-enable";
+
+/// Whether the fake part is in FDD — the property's latest value, or a stock
+/// Pluto's.
+///
+/// The real driver only takes the property at `initialize`; this takes it at
+/// once. The client always commits straight after writing it, so nothing it
+/// does can see the difference.
+fn fake_is_fdd(g: &DeviceState) -> bool {
+    g.get(FDD_PROPERTY).unwrap_or_else(|| default_attr(FDD_PROPERTY)) == "1"
+}
+
+/// What a `READ` of `key` answers: the last value written, or the device's own.
+/// Shared by both fake servers so the two cannot drift.
+fn read_value(g: &DeviceState, key: &str) -> String {
+    if key == "ad9361-phy/ensm_mode_available" {
+        return ensm_modes_available(g).to_string();
+    }
+    g.get(key).unwrap_or_else(|| default_attr(key)).to_string()
+}
+
+/// What the AD9361 driver prints for `ensm_mode_available`: the states the
+/// part can be asked for, which is the one place its duplex mode is readable
+/// without the debug attributes.
+fn ensm_modes_available(g: &DeviceState) -> &'static str {
+    if fake_is_fdd(g) {
+        "sleep wait alert fdd pinctrl pinctrl_fdd_indep"
+    } else {
+        "sleep wait alert rx tx pinctrl"
     }
 }
 
@@ -400,11 +442,7 @@ fn serve(sock: TcpStream, state: Arc<Mutex<DeviceState>>, stop: Arc<AtomicBool>,
             Some("PRINT") => writer.write_all(format!("{}\n{xml}\n", xml.len()).as_bytes()).is_ok(),
             Some("READ") => {
                 let key = attr_key(&words[1..]);
-                let value = {
-                    let g = state.lock().expect("lock");
-                    g.get(&key).map(str::to_string)
-                }
-                .unwrap_or_else(|| default_attr(&key).to_string());
+                let value = read_value(&state.lock().expect("lock"), &key);
                 let mut payload = value.into_bytes();
                 payload.push(0);
                 writer
@@ -425,6 +463,35 @@ fn serve(sock: TcpStream, state: Arc<Mutex<DeviceState>>, stop: Arc<AtomicBool>,
                 let value =
                     String::from_utf8_lossy(&payload).trim_end_matches('\0').trim().to_string();
                 if refuses_carrier(&state, &key, &value) {
+                    let _ = writer.write_all(b"-22\n");
+                    if writer.flush().is_err() {
+                        break;
+                    }
+                    continue;
+                }
+                // The state machine checks the state asked for against the
+                // mode the part is in: `rx` and `tx` are TDD states, `fdd` is
+                // FDD's. And `fdd` asked of a TDD part is not merely refused —
+                // from anywhere but `alert`, the driver forces the part
+                // through `alert` and then writes FORCE_TX_ON, which in TDD is
+                // *transmit*, before it answers -EINVAL. Modelled, because it
+                // is the one wrong write here that keys the radio.
+                if key == "ad9361-phy/ensm_mode" && {
+                    let mut g = state.lock().expect("lock");
+                    let fdd = fake_is_fdd(&g);
+                    let refused = match value.as_str() {
+                        "rx" | "tx" => fdd,
+                        "fdd" => !fdd,
+                        _ => false,
+                    };
+                    if refused
+                        && !fdd
+                        && g.get(&key).unwrap_or_else(|| default_attr(&key)) != "alert"
+                    {
+                        g.attrs.push((key.clone(), "tx".to_string()));
+                    }
+                    refused
+                } {
                     let _ = writer.write_all(b"-22\n");
                     if writer.flush().is_err() {
                         break;
@@ -1050,6 +1117,30 @@ fn releasing_does_not_wait_out_a_stalled_read() {
     );
 }
 
+/// Breaking that read is our own doing, and has to be understood as such.
+///
+/// From the receive thread's side a socket shut down by `release` is
+/// indistinguishable from the far end hanging up: "the server closed the
+/// connection with N bytes still due". It used to be reported exactly so, as a
+/// warning, followed by a redial — which is what every run of the `probe`
+/// example ends with, since it releases the radio after two seconds of
+/// streaming. Issue #470 was read as `iiod` crashing two seconds in.
+#[test]
+fn releasing_mid_read_is_not_reported_as_a_failed_socket() {
+    let fake = Fake::start_that_stalls_mid_buffer();
+    let mut handle =
+        PlutoHandle::open(&fake.address(), &config(), 435_000_000.0).expect("open the fake Pluto");
+    // Inside the stalled read, which is where the probe's release lands.
+    std::thread::sleep(Duration::from_millis(300));
+    handle.release();
+
+    let trace = handle.trace().dump();
+    assert!(
+        !trace.contains("socket failed"),
+        "a socket this client shut down was reported as a failure:\n{trace}"
+    );
+}
+
 /// `rf_port_select` is refused while the receive buffer is running, and the
 /// engine re-asserts the antenna on every retune. A radio with one wired port
 /// therefore logged a rejected write each time the dial moved, for a change
@@ -1321,18 +1412,122 @@ fn full_duplex_receives_through_an_over() {
 /// sentence on screen rather than a silent half-duplex over.
 #[test]
 fn full_duplex_on_a_tdd_board_says_so() {
+    let fake = Fake::start_with(somebody_elses_tdd_board(), CONTEXT_XML.to_string());
+    let cfg = PlutoConfig { full_duplex: true, ..config() };
+    let handle = PlutoHandle::open(&fake.address(), &cfg, 145_500_000.0).expect("it still opens");
+    let status = handle.open_status().unwrap_or_default();
+    assert!(status.contains("TDD"), "the mode should be named, got {status:?}");
+    assert!(status.contains("full duplex"), "and what it collides with, got {status:?}");
+}
+
+/// A board in TDD with no GPO pin slaved — somebody else's arrangement, and
+/// idle, which in TDD is `alert`: nobody is driving the state machine.
+fn somebody_elses_tdd_board() -> DeviceState {
+    DeviceState {
+        attrs: vec![
+            (FDD_PROPERTY.to_string(), "0".to_string()),
+            ("ad9361-phy/ensm_mode".to_string(), "alert".to_string()),
+        ],
+        ..DeviceState::default()
+    }
+}
+
+/// Issue #470: a Pluto in FDD whose state machine sat in `alert`. The radio
+/// opened, every register read back as configured, and the capture was one
+/// sample word repeated for two seconds — a receiver that was never on.
+///
+/// `alert` is a state both modes have, and the driver parks an FDD part there
+/// around its own calibrations — and leaves it there when one fails, since its
+/// bandwidth update returns before restoring. The client used to read "not
+/// `fdd`" as "somebody's TDD" and leave the board alone. On an FDD part there
+/// is nothing to respect: `fdd` is the only state that receives.
+///
+/// Put back last, after every write that can calibrate — any of them can be
+/// the one that parks it again.
+#[test]
+fn an_fdd_board_parked_in_alert_is_put_back_to_receiving() {
     let fake = Fake::start_with(
         DeviceState {
-            attrs: vec![("ad9361-phy/ensm_mode".to_string(), "tdd".to_string())],
+            attrs: vec![("ad9361-phy/ensm_mode".to_string(), "alert".to_string())],
             ..DeviceState::default()
         },
         CONTEXT_XML.to_string(),
     );
-    let cfg = PlutoConfig { full_duplex: true, ..config() };
-    let handle = PlutoHandle::open(&fake.address(), &cfg, 145_500_000.0).expect("it still opens");
+    let handle =
+        PlutoHandle::open(&fake.address(), &config(), 100_000_000.0).expect("open the fake Pluto");
+    wait_for("the receive buffer", || fake.state.lock().unwrap().rx_buffer_open);
+
+    let g = fake.state.lock().expect("lock");
+    assert_eq!(g.get("ad9361-phy/ensm_mode"), Some("fdd"), "the receiver has to be switched on");
+    // The fixture's own `alert`, then the one write.
+    assert_eq!(g.writes_of("ad9361-phy/ensm_mode"), vec!["alert", "fdd"]);
+    // Not by reinitialising the part: the state is all that was wrong.
+    let touched: Vec<&str> =
+        g.attrs.iter().map(|(k, _)| k.as_str()).filter(|k| k.contains("/DEBUG/")).collect();
+    assert!(touched.is_empty(), "the device tree was rewritten: {touched:?}");
+    let last = |key: &str| g.attrs.iter().rposition(|(k, _)| k == key);
+    let fdd_at = last("ad9361-phy/ensm_mode").expect("written");
+    for key in [
+        "ad9361-phy/INPUT/voltage0/sampling_frequency",
+        "ad9361-phy/INPUT/voltage0/rf_bandwidth",
+        "ad9361-phy/OUTPUT/altvoltage0/frequency",
+        "ad9361-phy/OUTPUT/altvoltage1/frequency",
+    ] {
+        let at = last(key).unwrap_or_else(|| panic!("{key} was never written"));
+        assert!(at < fdd_at, "{key} was written after the state machine was put back");
+    }
+    drop(g);
+    drop(handle);
+}
+
+/// …and the other side of that line. A TDD board nobody here is driving stays
+/// as it is — but a receiver that is off is said out loud, rather than shown
+/// as a flat line. And `fdd` is never written to it: on a TDD part the driver
+/// answers that by switching the transmitter on.
+#[test]
+fn somebody_elses_idle_tdd_board_is_left_alone_and_says_it_is_not_receiving() {
+    let fake = Fake::start_with(somebody_elses_tdd_board(), CONTEXT_XML.to_string());
+    let handle =
+        PlutoHandle::open(&fake.address(), &config(), 145_500_000.0).expect("open the fake Pluto");
     let status = handle.open_status().unwrap_or_default();
-    assert!(status.contains("tdd"), "the mode should be named, got {status:?}");
-    assert!(status.contains("full duplex"), "and what it collides with, got {status:?}");
+    assert!(status.contains("not receiving"), "the dead receiver should be named, got {status:?}");
+    assert!(status.contains("TDD"), "and why, got {status:?}");
+    wait_for("the receive buffer", || fake.state.lock().unwrap().rx_buffer_open);
+
+    let g = fake.state.lock().expect("lock");
+    assert_eq!(g.writes_of("ad9361-phy/ensm_mode"), vec!["alert"], "the state machine was driven");
+    assert_eq!(g.writes_of(FDD_PROPERTY), vec!["0"], "the board was reconfigured");
+    drop(g);
+    drop(handle);
+}
+
+/// An FDD board whose state machine follows its ENABLE/TXNRX pins is being
+/// driven by whatever is wired to them. An `ensm_mode` write would hand
+/// control back to SPI, so a board like that is left as it is — and told.
+#[test]
+fn a_state_machine_on_its_enable_pins_is_not_taken_over() {
+    let fake = Fake::start_with(
+        DeviceState {
+            attrs: vec![
+                ("ad9361-phy/ensm_mode".to_string(), "alert".to_string()),
+                (
+                    "ad9361-phy/DEBUG/adi,ensm-enable-txnrx-control-enable".to_string(),
+                    "1".to_string(),
+                ),
+            ],
+            ..DeviceState::default()
+        },
+        CONTEXT_XML.to_string(),
+    );
+    let handle =
+        PlutoHandle::open(&fake.address(), &config(), 145_500_000.0).expect("open the fake Pluto");
+    let status = handle.open_status().unwrap_or_default();
+    assert!(status.contains("not receiving"), "the dead receiver should be named, got {status:?}");
+    assert!(status.contains("pins"), "and why, got {status:?}");
+    let g = fake.state.lock().expect("lock");
+    assert_eq!(g.writes_of("ad9361-phy/ensm_mode"), vec!["alert"], "the state machine was driven");
+    drop(g);
+    drop(handle);
 }
 
 /// The GPO transmit-receive switching, end to end: the device-tree properties
@@ -1468,7 +1663,9 @@ fn a_board_this_left_in_tdd_is_put_back_when_the_pins_are_turned_off() {
     let fake = Fake::start_with(
         DeviceState {
             attrs: vec![
-                ("ad9361-phy/ensm_mode".to_string(), "tdd".to_string()),
+                // TDD, and receiving: the last session's key-down left it in `rx`.
+                (FDD_PROPERTY.to_string(), "0".to_string()),
+                ("ad9361-phy/ensm_mode".to_string(), "rx".to_string()),
                 ("ad9361-phy/DEBUG/adi,gpo2-slave-rx-enable".to_string(), "1".to_string()),
                 ("ad9361-phy/DEBUG/adi,gpo3-slave-tx-enable".to_string(), "1".to_string()),
             ],
@@ -1695,11 +1892,7 @@ fn serve_with_xml(
             Some("TIMEOUT") => writer.write_all(b"0\n").is_ok(),
             Some("READ") => {
                 let key = attr_key(&words[1..]);
-                let value = {
-                    let g = state.lock().expect("lock");
-                    g.get(&key).map(str::to_string)
-                }
-                .unwrap_or_else(|| default_attr(&key).to_string());
+                let value = read_value(&state.lock().expect("lock"), &key);
                 let mut payload = value.into_bytes();
                 payload.push(0);
                 writer

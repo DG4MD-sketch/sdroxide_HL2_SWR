@@ -8607,8 +8607,8 @@ Three things to know before you switch it on:
 - **The panadapter still shows your transmission during an over**, not the
   receiver: the wideband display is fed the modulated I/Q as it goes out, which
   is the transmit monitor. It is the *audio* that keeps coming.
-- **A board in TDD cannot do it at all.** sdroxide reads the AD9361's
-  `ensm_mode` when you enable this and says so on connect if it is not `fdd`; a
+- **A board in TDD cannot do it at all.** sdroxide asks the AD9361 which duplex
+  it is configured for when you enable this and says so on connect if it is TDD; a
   stock Pluto boots in FDD, so this is only a concern on a board somebody has
   deliberately reconfigured — or on one you have put there yourself with the
   **PTT pins** setting below, which turns this checkbox off and says so.
@@ -8671,6 +8671,19 @@ FDD and un-slaves all four pins on the next connect. A radio that has never had
 these settings touched is left exactly as it booted, and so is one you have put
 in TDD yourself with no pin slaved to it — sdroxide undoes its own arrangement,
 not somebody else's.
+
+**If the radio connects but hears nothing at all.** The same state machine
+decides whether the receiver is on, and it can be left off with every other
+setting intact: the AD9361 driver parks it in *alert* while it calibrates, and
+does not always put it back. A Pluto in that state still streams, but what it
+streams is one value repeated — no signal and no noise, however the gain is
+set. sdroxide checks the state machine as the last step of every connect. On a
+board in FDD — every stock Pluto — it switches the receiver back on and logs
+that it did. It does not touch a board in TDD that you have not asked it to
+drive, or one whose state machine follows its enable pins, because both are
+somebody else's arrangement; it says on connect that the radio is not receiving
+and why instead. Choosing **TDD** under *Duplex* has sdroxide drive a TDD board
+itself.
 
 **The sample rate is a transmit setting too.** Every I/Q sample is four bytes in
 each direction, so 2.5 Msps is 10 MB/s the link has to carry — and on transmit
@@ -8740,7 +8753,11 @@ symptom to report if that ever fails.
 > It prints the limits the radio published, streams for two seconds, and reports
 > the measured rate and signal level. A plausible rate with a level of zero
 > means the link works and the sample layout does not; an implausible rate means
-> the framing is wrong.
+> the framing is wrong — unless every sample is the same value, which the probe
+> points out, and which means the receiver was not running at all (see *If the
+> radio connects but hears nothing*, above). The stream ends because the probe
+> closes the radio after its two seconds, so a trace that stops there is
+> expected, not a crash.
 
 
 #### 6.2.8 SDRplay RSP (USB)
