@@ -13968,6 +13968,19 @@ impl Engine {
         self.state.tx.cessb_db = s.cessb_db.clamp(0.0, sdroxide_types::CESSB_MAX_DB);
         self.state.tx.eq = s.tx_eq.clamped();
         self.state.repeater = s.repeater.clamped();
+        // The per-mode ones among those levels are now what this mode is being
+        // worked with, so they are its own values from here on — the same thing
+        // a restored session gets at startup. Left on the receiver alone they
+        // would be replaced by the mode's old values the first time the
+        // operator changed mode and came back.
+        let r = self.state.rx[0];
+        self.remember_mode_setting(RxId::Main, |p| {
+            p.agc = Some(r.agc);
+            p.manual_gain_db = Some(r.manual_gain_db);
+            p.squelch_db = Some(r.squelch_db);
+            p.noise_reduction = Some(r.noise_reduction);
+            p.binaural = Some(r.binaural);
+        });
 
         // The hardware preferences travel with the profile: the antenna port
         // and the gain stages, applied through the same paths an antenna CLI

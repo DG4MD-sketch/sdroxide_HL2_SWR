@@ -292,6 +292,37 @@ fn a_restored_sessions_levels_become_its_modes_own() {
     stop(h);
 }
 
+/// A working setup put back on sets the receiver's levels, and those become the
+/// mode's own: leaving the mode and coming back keeps them rather than returning
+/// to what the mode had before the setup was applied.
+#[test]
+fn a_working_setups_levels_become_its_modes_own() {
+    let _guard = CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    isolate("modeprofiles-working-setup");
+    let h = start(Mode::Usb);
+
+    // Saved with the noise reduction up, then turned back off in USB.
+    send(&h, Command::SetNoiseReduction { rx: RxId::Main, level: NrLevel::High });
+    send(&h, Command::ProfileSave("nr".into()));
+    send(&h, Command::SetNoiseReduction { rx: RxId::Main, level: NrLevel::Off });
+    let _ = wait_for(&h, "USB's NR off again", |s| {
+        s.rx[0].mode == Mode::Usb && s.rx[0].noise_reduction == NrLevel::Off
+    });
+
+    send(&h, Command::ProfileApply("nr".into()));
+    let _ = wait_for(&h, "the setup's NR", |s| {
+        s.rx[0].mode == Mode::Usb && s.rx[0].noise_reduction == NrLevel::High
+    });
+    send(&h, Command::SetMode { rx: RxId::Main, mode: Mode::Lsb });
+    let _ = wait_for(&h, "LSB", |s| s.rx[0].mode == Mode::Lsb);
+    send(&h, Command::SetMode { rx: RxId::Main, mode: Mode::Usb });
+    let s = wait_for(&h, "USB with the setup's NR", |s| {
+        s.rx[0].mode == Mode::Usb && s.rx[0].noise_reduction == NrLevel::High
+    });
+    assert_eq!(s.rx[0].noise_reduction, NrLevel::High);
+    stop(h);
+}
+
 /// Remembered means it survives a launch: a fresh engine in the same mode reads
 /// the file and applies the override with no command having been sent.
 ///
