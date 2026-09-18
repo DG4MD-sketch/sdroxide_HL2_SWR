@@ -81,11 +81,6 @@ const PAD: f64 = 1.25;
 /// Per-frame ease toward the auto-fit.
 const EASE: f64 = 0.06;
 
-/// Above this many targets on screen, only the selected and hovered ones keep
-/// their label. A busy approach channel is a wall of names with a chart
-/// somewhere underneath it.
-const LABEL_LIMIT: usize = 30;
-
 /// One nautical mile in degrees of latitude. A minute of arc, by definition —
 /// which is what makes converting knots into map degrees exact rather than
 /// approximate.
@@ -254,6 +249,66 @@ fn symbol(
 }
 
 /// Draw the map. Returns the vessel clicked this frame, if any.
+/// A laid-out vessel name, waiting for [`label_plan`] to say whether it fits:
+/// the tick that ties it to its symbol, and every line with its position, its
+/// galley and its colour.
+struct PendingLabel {
+    tick: (Pos2, Pos2),
+    tint: Color32,
+    lines: Vec<(Pos2, std::sync::Arc<eframe::egui::Galley>, Color32)>,
+}
+
+/// One name's place on the chart, for [`label_plan`]: where it would sit,
+/// whether it must appear, and how much it outranks the others.
+struct LabelSlot {
+    area: Rect,
+    must: bool,
+    rank: u8,
+}
+
+/// How hard a vessel's name fights for room on a crowded chart: lower wins.
+///
+/// The order is what a port watch would read first — a distress call, then a
+/// SOLAS ship, then anything actually under way, then the marks.
+fn label_rank(v: &AisVessel) -> u8 {
+    if v.is_alarm() {
+        0
+    } else if v.kind == AisKind::ClassA {
+        1
+    } else if v.kind.is_underway() {
+        2
+    } else {
+        3
+    }
+}
+
+/// Which of `slots` to draw, by index, in draw order.
+///
+/// The ones that must appear are placed first, so a crowded chart culls
+/// *around* the vessel the operator is looking at rather than through it; then
+/// the rest in rank order, each only if its box misses everything already
+/// placed and stays inside `bounds`. This is what replaced an all-or-nothing
+/// rule that dropped every name once more than a few dozen vessels were in
+/// view (issue #408).
+fn label_plan(slots: &[LabelSlot], bounds: Rect) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..slots.len()).collect();
+    order.sort_by_key(|&i| (!slots[i].must, slots[i].rank, i));
+    let mut placed: Vec<Rect> = Vec::new();
+    let mut out: Vec<usize> = Vec::new();
+    for i in order {
+        let slot = &slots[i];
+        if !slot.must
+            && (!bounds.contains_rect(slot.area)
+                || placed.iter().any(|q| q.intersects(slot.area)))
+        {
+            continue;
+        }
+        placed.push(slot.area);
+        out.push(i);
+    }
+    out
+}
+
 pub fn show(
     ui: &mut Ui,
     state: &mut AisMapState,
@@ -357,24 +412,13 @@ pub fn show(
         }
     }
 
-    let on_screen = live
-        .iter()
-        .filter(|v| v.lat.zip(v.lon).is_some_and(|(la, lo)| rect.contains(project(la, lo))))
-        .count();
-    let label_all = on_screen <= LABEL_LIMIT;
     let font = FontId::monospace(9.0);
-
-    let draw = |v: &AisVessel, top: bool| {
-        let Some((lat, lon)) = v.lat.zip(v.lon) else { return };
-        let c = project(lat, lon);
-        if !rect.contains(c) && !top {
-            return;
-        }
-        let selected = state.selected == Some(v.mmsi);
-        // A distress beacon and the row the operator picked get the same
-        // attention colour, because both mean "look here" and a chart with two
-        // of those is a chart with none.
-        let tint = if v.is_alarm() || selected {
+    let selected_mmsi = state.selected;
+    // A distress beacon and the row the operator picked get the same attention
+    // colour, because both mean "look here" and a chart with two of those is a
+    // chart with none.
+    let tint_for = |v: &AisVessel, top: bool| -> Color32 {
+        if v.is_alarm() || selected_mmsi == Some(v.mmsi) {
             map.dx
         } else if top {
             map.hover
@@ -385,48 +429,91 @@ pub fn show(
             // stations — is dimmer, so a busy marina does not out-shout the
             // traffic in the channel next to it.
             alpha(map.station, 175.0)
-        };
+        }
+    };
 
+    // ── symbols, under the names ──
+    // The hovered one last, so it sits over its neighbours.
+    let draw_symbol = |v: &AisVessel, top: bool| {
+        let Some((lat, lon)) = v.lat.zip(v.lon) else { return };
+        let c = project(lat, lon);
+        if !rect.contains(c) && !top {
+            return;
+        }
+        let tint = tint_for(v, top);
         // The vector, under the symbol: where it is now matters more than where
         // it will be.
         if let Some((la, lo)) = vector(v, cfg.vector_minutes) {
             p.line_segment([c, project(la, lo)], (1.2, alpha(tint, 185.0)));
         }
-
-        let r = if top || selected { HULL_R + 1.0 } else { HULL_R };
+        let r = if top || selected_mmsi == Some(v.mmsi) { HULL_R + 1.0 } else { HULL_R };
         symbol(&p, c, v.kind, v.icon_deg(), r, tint, map.sea);
-
-        // The label, up and to the right, with a tick joining it to the symbol
-        // so a crowded picture still says which label belongs to which.
-        if label_all || top || selected {
-            let anchor = c + vec2(r + 3.0, -(r + 2.0));
-            p.line_segment([c + vec2(r * 0.6, -r * 0.6), anchor], (1.0, alpha(tint, 110.0)));
-            // The speed only where there is one to have. A buoy labelled
-            // "--- kt" is two characters of information and a line of noise on
-            // a chart that may carry a hundred of them.
-            let mut lines = vec![v.label()];
-            if let Some(kt) = v.sog_kt.filter(|_| v.kind.is_underway()) {
-                lines.push(format!("{kt:.1} kt"));
-            }
-            for (k, line) in lines.iter().enumerate() {
-                p.text(
-                    anchor + vec2(2.0, -((lines.len() - 1 - k) as f32) * 10.0 - 5.0),
-                    Align2::LEFT_CENTER,
-                    line,
-                    font.clone(),
-                    alpha(tint, if k == 0 { 240.0 } else { 185.0 }),
-                );
-            }
-        }
     };
-
     for (i, v) in live.iter().enumerate() {
         if hover != Some(i) {
-            draw(v, false);
+            draw_symbol(v, false);
         }
     }
     if let Some(i) = hover {
-        draw(live[i], true);
+        draw_symbol(live[i], true);
+    }
+
+    // ── the names ──
+    // Laid out first, then placed greedily: the selected and hovered always,
+    // the rest by how much they matter — a distress call, then a SOLAS ship,
+    // then anything under way — each only if its name misses what is already on
+    // the chart. A busy approach channel then keeps the names that say the
+    // most, rather than losing every one of them at once the moment a few
+    // dozen vessels are in view (issue #408).
+    //
+    // The tick joining a name to its symbol is drawn only where a name is, so
+    // a crowded picture still says which belongs to which.
+    let mut slots: Vec<LabelSlot> = Vec::new();
+    let mut pending: Vec<PendingLabel> = Vec::new();
+    for (i, v) in live.iter().enumerate() {
+        let Some((lat, lon)) = v.lat.zip(v.lon) else { continue };
+        let c = project(lat, lon);
+        let top = hover == Some(i);
+        let selected = selected_mmsi == Some(v.mmsi);
+        let must = top || selected || v.is_alarm();
+        if !rect.contains(c) && !must {
+            continue;
+        }
+        let r = if top || selected { HULL_R + 1.0 } else { HULL_R };
+        let anchor = c + vec2(r + 3.0, -(r + 2.0));
+        let tint = tint_for(v, top);
+        // The speed only where there is one to have. A buoy labelled "--- kt"
+        // is two characters of information and a line of noise on a chart that
+        // may carry a hundred of them.
+        let mut lines = vec![v.label()];
+        if let Some(kt) = v.sog_kt.filter(|_| v.kind.is_underway()) {
+            lines.push(format!("{kt:.1} kt"));
+        }
+        let n = lines.len();
+        let mut drawn = Vec::with_capacity(n);
+        let mut area: Option<Rect> = None;
+        for (k, line) in lines.into_iter().enumerate() {
+            let colour = alpha(tint, if k == 0 { 240.0 } else { 185.0 });
+            let galley = p.layout_no_wrap(line, font.clone(), colour);
+            let at = pos2(anchor.x + 2.0, anchor.y - (n - 1 - k) as f32 * 10.0 - galley.size().y / 2.0);
+            let line_rect = Rect::from_min_size(at, galley.size());
+            area = Some(area.map_or(line_rect, |a| a.union(line_rect)));
+            drawn.push((at, galley, colour));
+        }
+        let Some(area) = area else { continue };
+        slots.push(LabelSlot { area: area.expand(1.0), must, rank: label_rank(v) });
+        pending.push(PendingLabel {
+            tick: (c + vec2(r * 0.6, -r * 0.6), anchor),
+            tint,
+            lines: drawn,
+        });
+    }
+    for i in label_plan(&slots, rect) {
+        let label = &pending[i];
+        p.line_segment([label.tick.0, label.tick.1], (1.0, alpha(label.tint, 110.0)));
+        for (at, galley, colour) in &label.lines {
+            p.galley(*at, galley.clone(), *colour);
+        }
     }
 
     // ── us ──
@@ -586,6 +673,47 @@ mod tests {
         v.sog_kt = Some(kt);
         v.cog_deg = Some(course);
         v
+    }
+
+    fn slot(x: f32, y: f32, must: bool, rank: u8) -> LabelSlot {
+        LabelSlot { area: Rect::from_min_size(pos2(x, y), vec2(20.0, 8.0)), must, rank }
+    }
+
+    /// A chart too busy for every name keeps the ones that say the most, by
+    /// rank — the opposite of the rule this replaced, which dropped them all at
+    /// once once a few dozen vessels were in view (issue #408).
+    #[test]
+    fn a_crowded_chart_keeps_the_names_that_matter() {
+        let bounds = Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 100.0));
+        // Two names claiming the same room: the better-ranked one wins.
+        let slots = vec![slot(0.0, 0.0, false, 3), slot(0.0, 0.0, false, 1)];
+        assert_eq!(label_plan(&slots, bounds), vec![1]);
+        // Names that do not collide all fit, whatever their rank.
+        let slots = vec![slot(0.0, 0.0, false, 3), slot(40.0, 0.0, false, 1)];
+        let plan = label_plan(&slots, bounds);
+        assert!(plan.contains(&0) && plan.contains(&1), "both should fit: {plan:?}");
+    }
+
+    /// The name the operator picked or is pointing at is placed first and drawn
+    /// whatever else is around it, so a crowded chart culls *around* it rather
+    /// than through it.
+    #[test]
+    fn the_name_the_operator_is_looking_at_always_shows() {
+        let bounds = Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 100.0));
+        // A must-label takes the room from a better-ranked one...
+        let slots = vec![slot(10.0, 10.0, true, 3), slot(10.0, 10.0, false, 0)];
+        assert_eq!(label_plan(&slots, bounds), vec![0]);
+        // ...and is drawn even off the chart, where the painter clips it.
+        let slots = vec![slot(190.0, 95.0, true, 3)];
+        assert_eq!(label_plan(&slots, bounds), vec![0]);
+    }
+
+    /// A name with no room on the chart does not show, unless it must.
+    #[test]
+    fn a_name_off_the_chart_is_dropped_unless_it_must_show() {
+        let bounds = Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 100.0));
+        assert!(label_plan(&[slot(190.0, 95.0, false, 0)], bounds).is_empty());
+        assert!(label_plan(&[slot(-25.0, 0.0, false, 0)], bounds).is_empty());
     }
 
     /// The vector's length is the distance covered in the vector time, in
