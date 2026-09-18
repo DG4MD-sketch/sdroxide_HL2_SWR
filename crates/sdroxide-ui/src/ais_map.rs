@@ -474,10 +474,12 @@ pub fn show(
         let c = project(lat, lon);
         let top = hover == Some(i);
         let selected = selected_mmsi == Some(v.mmsi);
-        let must = top || selected || v.is_alarm();
-        if !rect.contains(c) && !must {
+        // Only where the symbol is on the chart: a name for one off it would be
+        // a name and a tick pointing at nothing, at the chart's edge.
+        if !rect.contains(c) {
             continue;
         }
+        let must = top || selected || v.is_alarm();
         let r = if top || selected { HULL_R + 1.0 } else { HULL_R };
         let anchor = c + vec2(r + 3.0, -(r + 2.0));
         let tint = tint_for(v, top);
@@ -703,7 +705,8 @@ mod tests {
         // A must-label takes the room from a better-ranked one...
         let slots = vec![slot(10.0, 10.0, true, 3), slot(10.0, 10.0, false, 0)];
         assert_eq!(label_plan(&slots, bounds), vec![0]);
-        // ...and is drawn even off the chart, where the painter clips it.
+        // ...and is drawn even where it runs off the chart's edge, where the
+        // painter clips it.
         let slots = vec![slot(190.0, 95.0, true, 3)];
         assert_eq!(label_plan(&slots, bounds), vec![0]);
     }
