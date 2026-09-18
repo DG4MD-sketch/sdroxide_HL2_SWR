@@ -221,6 +221,42 @@ fn resetting_every_mode_puts_all_of_them_back() {
     stop(h);
 }
 
+/// A restored session is not undone at startup by the mode's own defaults.
+///
+/// The upgrade case, and the reason this was a bug: a build that has per-mode
+/// settings arrives with an empty `modeprofiles.json`, but the operator's
+/// `session.json` carries real settings. If startup lays the mode's defaults
+/// on the receiver *after* restoring the session (as the first version did),
+/// every saved AGC, squelch, NR, binaural and RX gain is silently reset on the
+/// first launch. The session is the operator's last word on the mode it was
+/// left in; the profile applies when the mode is next *chosen*.
+#[test]
+fn a_restored_session_is_not_reset_by_the_modes_defaults() {
+    let _guard = CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    isolate("modeprofiles-session");
+
+    // A session carrying a departure — FT8 ships NR off. This also writes an
+    // override; removing that file afterwards leaves exactly the state an
+    // upgrade starts from: a real session and no overrides.
+    {
+        let h = start(Mode::Ft8);
+        send(&h, Command::SetNoiseReduction { rx: RxId::Main, level: NrLevel::High });
+        let _ = wait_for(&h, "FT8's changed NR", |s| {
+            s.rx[0].mode == Mode::Ft8 && s.rx[0].noise_reduction == NrLevel::High
+        });
+        stop(h);
+    }
+    let dir = std::env::var("SDROXIDE_CONFIG_DIR").unwrap();
+    let _ = std::fs::remove_file(std::path::Path::new(&dir).join("modeprofiles.json"));
+
+    let h = start(Mode::Ft8);
+    let s = wait_for(&h, "FT8's restored session", |s| {
+        s.rx[0].mode == Mode::Ft8 && s.rx[0].noise_reduction == NrLevel::High
+    });
+    assert_eq!(s.rx[0].noise_reduction, NrLevel::High, "the restored session must stand");
+    stop(h);
+}
+
 /// Remembered means it survives a launch: a fresh engine in the same mode reads
 /// the file and applies the override with no command having been sent.
 #[test]

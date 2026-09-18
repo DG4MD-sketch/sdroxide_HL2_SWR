@@ -3671,6 +3671,13 @@ fn engine_thread(
     // and the receiver chain are built at, and building them at the device rate
     // first would mean tearing them down again before the first block.
     let session = engine_cfg.remember_session.then(|| engine_cfg.store.load_session());
+    // Whether that session came off the disk or is the default. `load_session`
+    // answers a default either way — which is what keeps an engine remembering
+    // from its first change — so the file's presence has to be asked
+    // separately. Only a *restored* session suppresses the mode defaults at
+    // startup; see the profile block below.
+    let session_restored =
+        engine_cfg.remember_session && engine_cfg.store.load_session_if_present().is_some();
     // Held separately from what this front end can carry: a start on a stand-in
     // (a radio switched off, a rig that isn't there yet) must not be the thing
     // that forgets it — see `Engine::want_decimation`.
@@ -3795,12 +3802,26 @@ fn engine_thread(
         state.repeater = s.repeater.clamped();
         state.recording_mono = s.recording_mono;
     }
-    // The mode's own settings sit on top of the remembered session. The session
-    // is the station's blanket fallback; a mode profile is a statement about
-    // that mode in particular, so it wins — see `Mode::default_profile`.
-    for rx in &mut state.rx {
-        let profile = mode_profiles.effective(rx.mode);
-        profile.apply_to(rx);
+    // A mode's profile is applied when the mode is *chosen*, not when the
+    // program starts into a mode the operator already left it in.
+    //
+    // Applying it here as well would undo the session that was just restored:
+    // `effective` fills every field the profile speaks to from the mode's
+    // defaults, so a station upgrading to a build with per-mode settings —
+    // whose `modeprofiles.json` is still empty — would come up with the saved
+    // AGC, squelch, noise reduction, binaural and RX gain reset to the mode
+    // defaults, silently. The restored session is the operator's own last
+    // word on the mode it was left in, so it stands; the profile applies from
+    // here on, the first time the mode changes (see `set_rx_mode`).
+    //
+    // With no session — a first run, or an engine told not to remember — there
+    // is nothing to undo and the mode's defaults are exactly what should be
+    // there.
+    if !session_restored {
+        for rx in &mut state.rx {
+            let profile = mode_profiles.effective(rx.mode);
+            profile.apply_to(rx);
+        }
     }
     // The command line outranks the remembered session, exactly as it does for
     // the dial and the mode.
