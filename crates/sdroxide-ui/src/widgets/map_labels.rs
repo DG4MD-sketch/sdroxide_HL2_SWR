@@ -136,10 +136,10 @@ impl Slot {
     }
 }
 
-/// What is already on the map — symbols, marks, names placed so far — filed
-/// by the cells of a coarse grid, so asking whether a name would hit any of it
-/// looks at its few neighbours rather than at everything on a map that may
-/// carry hundreds of targets.
+/// Boxes already on the map — the symbols and marks, or the names placed so
+/// far — filed by the cells of a coarse grid, so asking whether a name would
+/// hit one looks at its few neighbours rather than at everything on a map that
+/// may carry hundreds of targets.
 struct Occupancy {
     origin: Pos2,
     cols: usize,
@@ -186,28 +186,37 @@ impl Occupancy {
 /// Which of `slots` to draw, by index, and off which corner, in draw order.
 ///
 /// The ones that must appear first — at a corner with room where there is one,
-/// so a selected target at the map's edge still shows its whole name, and
-/// wherever it lands where there is none. Then the rest in rank order, each at
-/// the first corner whose box stays inside `bounds` and misses every symbol,
-/// every one of `marks` and every name already placed, or not at all.
+/// so a selected target at the map's edge still shows its whole name. Where
+/// there is none, one that at least misses the other names, so a selected
+/// vessel beside one in distress in a crowded harbour does not write over it;
+/// and where there is not even that, wherever it lands. Then the rest in rank
+/// order, each at the first corner whose box stays inside `bounds` and misses
+/// every symbol, every one of `marks` and every name already placed, or not at
+/// all.
 fn plan(slots: &[Slot], marks: &[Rect], bounds: Rect) -> Vec<(usize, Corner)> {
-    let mut taken = Occupancy::new(bounds);
+    let mut symbols = Occupancy::new(bounds);
     for r in slots.iter().map(Slot::symbol).chain(marks.iter().copied()) {
-        taken.insert(r);
+        symbols.insert(r);
     }
+    let mut names = Occupancy::new(bounds);
     let mut order: Vec<usize> = (0..slots.len()).collect();
     order.sort_by_key(|&i| (!slots[i].must, slots[i].rank, slots[i].key));
     let mut out = Vec::new();
     for i in order {
         let slot = &slots[i];
         let inside = |c: &Corner| bounds.contains_rect(slot.area(*c));
-        let clear = |c: &Corner| inside(c) && !taken.hits(slot.area(*c));
+        let unnamed = |c: &Corner| inside(c) && !names.hits(slot.area(*c));
+        let clear = |c: &Corner| unnamed(c) && !symbols.hits(slot.area(*c));
         let corner = match Corner::ALL.iter().find(|c| clear(c)) {
             Some(&c) => c,
-            None if slot.must => Corner::ALL.into_iter().find(inside).unwrap_or(Corner::UpRight),
+            None if slot.must => Corner::ALL
+                .into_iter()
+                .find(unnamed)
+                .or_else(|| Corner::ALL.into_iter().find(inside))
+                .unwrap_or(Corner::UpRight),
             None => continue,
         };
-        taken.insert(slot.area(corner));
+        names.insert(slot.area(corner));
         out.push((i, corner));
     }
     out
@@ -415,9 +424,22 @@ mod tests {
         let slots = vec![slot(4.0, 30.0, true, 3), slot(4.0, 30.0, false, 0)];
         assert_eq!(only(&plan(&slots, &[], narrow)), vec![0]);
         // ...and where no corner has room it is drawn anyway, up and to the
-        // right, where the painter clips it.
+        // right, where the painter clips it...
         let tiny = Rect::from_min_size(pos2(0.0, 0.0), vec2(20.0, 20.0));
         assert_eq!(plan(&[slot(10.0, 10.0, true, 3)], &[], tiny), vec![(0, Corner::UpRight)]);
+        // ...but two of them hemmed in by symbols on every side still keep off
+        // each other's names: a selected vessel beside one in distress in a
+        // crowded harbour must not write over it.
+        let mut slots = vec![slot(100.0, 50.0, true, 0), slot(100.0, 50.0, true, 1)];
+        for (x, y) in [(130.0, 35.0), (70.0, 35.0), (130.0, 65.0), (70.0, 65.0)] {
+            slots.push(slot(x, y, false, 3));
+        }
+        let placed = plan(&slots, &[], bounds());
+        let area = |i: usize| {
+            let &(_, c) = placed.iter().find(|&&(j, _)| j == i).expect("placed");
+            slots[i].area(c)
+        };
+        assert!(!area(0).intersects(area(1)), "{:?} over {:?}", area(1), area(0));
     }
 
     /// A name with no room anywhere on the map does not show, unless it must.
