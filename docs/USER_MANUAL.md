@@ -833,7 +833,8 @@ mode: a little noise reduction helps a weak SSB voice and only gets in the way
 of an FT8 decoder, and a slow AGC is kinder to a signal sitting in the noise
 than the fast one that sounds right on a strong local. So each mode carries a
 set of starting values for **AGC**, **Man**, **SQL**, **NR**, **ANC**, **BIN**
-and WFM's **ST**, and selecting a mode lays its own on the receiver.
+and WFM's **ST**, and selecting a mode — here, or on a CAT rig's own controls —
+lays its own on the receiver.
 
 The built-in defaults are deliberately plain. A slow AGC on the weak-signal
 digital modes, whose whole point is signals near the noise, and the stock medium

@@ -5832,8 +5832,17 @@ impl Engine {
                 // Non-digital: follow the operator's rig, but only when the
                 // underlying rig class actually changed (ignore USB↔DIGU echoes).
                 if !same_class {
+                    // A mode chosen on the radio is a mode chosen: it gets that
+                    // mode's settings exactly as the mode buttons here would,
+                    // or an operator who works the rig's own controls would
+                    // carry one mode's AGC and noise reduction into the next.
+                    let profile =
+                        (self.state.rx[0].mode != m).then(|| self.mode_profiles.effective(m));
                     let r = &mut self.state.rx[0];
                     r.mode = m;
+                    if let Some(profile) = profile {
+                        profile.apply_to(r);
+                    }
                     (r.filter_lo, r.filter_hi) = m.default_filter();
                     let snapshot = *r;
                     // Rebuild the demodulator for the new mode. Sideband is
@@ -12619,9 +12628,11 @@ impl Engine {
             RxId::Sub => self.state.sub_rx_hz,
         };
         // The profile to lay on, decided before the borrow below. Only on a real
-        // change: `set_rx_mode` also runs when a rig reports the mode it is
-        // already in, and a profile re-applied then would overwrite the tweak
-        // the operator just made.
+        // change: `set_rx_mode` also runs when the mode stays what it was — a
+        // band-stack recall or a memory in the same mode, a client re-sending
+        // the mode it read — and a profile re-applied then would overwrite the
+        // tweak the operator just made. A mode the rig reports goes through
+        // `apply_control`, which applies the profile on the same terms.
         let profile =
             (self.state.rx[rx.index()].mode != mode).then(|| self.mode_profiles.effective(mode));
         let r = &mut self.state.rx[rx.index()];

@@ -8,10 +8,12 @@
 //! overrides for good. The last one is also checked across a restart, because
 //! "remembered" that does not survive a launch is not remembered.
 
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use sdroxide_radio::{
-    AudioParams, Complex32, EngineConfig, EngineHandles, IqSource, Result, rtrb, start_engine,
+    AudioParams, Complex32, ControlUpdate, EngineConfig, EngineHandles, IqSource, Result, rtrb,
+    start_engine,
 };
 use sdroxide_types::{AgcMode, Command, DeviceCaps, Mode, NrLevel, RadioEvent, RadioState, RxId};
 
@@ -45,6 +47,33 @@ impl IqSource for Quiet {
     }
 }
 
+/// [`Quiet`] with a radio's own controls: what is pushed onto `knob` is
+/// reported to the engine the way a CAT rig reports its front panel.
+struct RigKnob {
+    knob: Arc<Mutex<Vec<ControlUpdate>>>,
+}
+
+impl IqSource for RigKnob {
+    fn sample_rate(&self) -> f64 {
+        Quiet.sample_rate()
+    }
+    fn center_hz(&self) -> f64 {
+        Quiet.center_hz()
+    }
+    fn set_center_hz(&mut self, _hz: f64) -> Result<()> {
+        Ok(())
+    }
+    fn read(&mut self, buf: &mut [Complex32]) -> Result<usize> {
+        Quiet.read(buf)
+    }
+    fn describe(&self) -> String {
+        "rig knob mock".into()
+    }
+    fn poll_control(&mut self) -> Vec<ControlUpdate> {
+        std::mem::take(&mut *self.knob.lock().unwrap())
+    }
+}
+
 fn caps() -> DeviceCaps {
     DeviceCaps {
         driver: "mock".into(),
@@ -72,9 +101,13 @@ fn isolate(name: &str) {
 }
 
 fn start(mode: Mode) -> EngineHandles {
+    start_on(Box::new(Quiet), mode)
+}
+
+fn start_on(source: Box<dyn IqSource>, mode: Mode) -> EngineHandles {
     let (producer, _consumer) = rtrb::RingBuffer::<f32>::new(48_000);
     start_engine(
-        Box::new(Quiet),
+        source,
         caps(),
         EngineConfig {
             audio: Some(AudioParams { producer, out_rate: RATE }),
@@ -190,6 +223,37 @@ fn the_operators_change_is_kept_per_mode_and_reset() {
     });
     assert_eq!(s.rx[0].noise_reduction, NrLevel::Off);
 
+    stop(h);
+}
+
+/// A mode chosen on the radio's own controls gets that mode's settings, the
+/// same as one chosen here.
+#[test]
+fn a_mode_changed_on_the_rig_gets_that_modes_settings() {
+    let _guard = CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    isolate("modeprofiles-rig-knob");
+    let knob = Arc::new(Mutex::new(Vec::new()));
+    let h = start_on(Box::new(RigKnob { knob: knob.clone() }), Mode::Usb);
+
+    // LSB remembers its noise reduction up; USB leaves it off. Waited for in
+    // turn, so the USB state below is the one after the change back and not the
+    // one the engine started with.
+    send(&h, Command::SetMode { rx: RxId::Main, mode: Mode::Lsb });
+    send(&h, Command::SetNoiseReduction { rx: RxId::Main, level: NrLevel::High });
+    let _ = wait_for(&h, "LSB's NR up", |s| {
+        s.rx[0].mode == Mode::Lsb && s.rx[0].noise_reduction == NrLevel::High
+    });
+    send(&h, Command::SetMode { rx: RxId::Main, mode: Mode::Usb });
+    let _ = wait_for(&h, "USB with its NR off", |s| {
+        s.rx[0].mode == Mode::Usb && s.rx[0].noise_reduction == NrLevel::Off
+    });
+
+    // The operator turns the rig's mode knob to LSB.
+    knob.lock().unwrap().push(ControlUpdate::Mode(Mode::Lsb));
+    let s = wait_for(&h, "LSB from the rig, with LSB's NR", |s| {
+        s.rx[0].mode == Mode::Lsb && s.rx[0].noise_reduction == NrLevel::High
+    });
+    assert_eq!(s.rx[0].noise_reduction, NrLevel::High);
     stop(h);
 }
 
