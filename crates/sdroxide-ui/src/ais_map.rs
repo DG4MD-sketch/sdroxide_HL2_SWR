@@ -452,7 +452,12 @@ pub fn show(
             key: v.mmsi,
         });
     }
-    map_labels::draw(&p, rect, &font, labels);
+    // Our own mark is drawn over the names, so they keep off it.
+    let marks: Vec<Rect> = home
+        .map(|(lat, lon)| Rect::from_center_size(project(lat, lon), vec2(16.0, 16.0)))
+        .into_iter()
+        .collect();
+    map_labels::draw(&p, rect, &font, labels, &marks);
 
     // ── us ──
     if let Some((lat, lon)) = home {

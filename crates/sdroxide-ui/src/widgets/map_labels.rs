@@ -15,11 +15,24 @@
 //! tenth of the map from the edge, which is less than a long name needs, so a
 //! name that could only sit up and to the right went missing on exactly the
 //! targets that frame the picture.
+//!
+//! Every symbol is in the way too, not only the names: a name drawn over a
+//! neighbour hides the one thing on the map that says where that neighbour is.
+
+use std::ops::RangeInclusive;
 
 use eframe::egui::{Color32, FontId, Painter, Pos2, Rect, Vec2, pos2, vec2};
 
 /// From one line of a name to the next, in points.
 const PITCH: f32 = 10.0;
+
+/// How far a symbol's halo reaches past its radius. Both maps draw a disc of
+/// sea this far out round every symbol, so a name over the halo hides the
+/// symbol as surely as one over the symbol itself.
+const HALO: f32 = 2.0;
+
+/// Side of one cell of [`Occupancy`], in points: about one short name.
+const CELL: f32 = 48.0;
 
 /// One target's name, waiting to be placed.
 pub struct MapLabel {
@@ -88,6 +101,13 @@ struct Slot {
 }
 
 impl Slot {
+    /// The symbol with its halo. A name never reaches its own — the block
+    /// starts two points past the halo — so every symbol can stand in the way
+    /// of every name without asking whose it is.
+    fn symbol(&self) -> Rect {
+        Rect::from_center_size(self.at, Vec2::splat(2.0 * (self.r + HALO)))
+    }
+
     /// Where the tick joining name and symbol ends.
     fn anchor(&self, corner: Corner) -> Pos2 {
         let (sx, sy) = corner.signs();
@@ -116,28 +136,78 @@ impl Slot {
     }
 }
 
+/// What is already on the map — symbols, marks, names placed so far — filed
+/// by the cells of a coarse grid, so asking whether a name would hit any of it
+/// looks at its few neighbours rather than at everything on a map that may
+/// carry hundreds of targets.
+struct Occupancy {
+    origin: Pos2,
+    cols: usize,
+    rows: usize,
+    cells: Vec<Vec<Rect>>,
+}
+
+impl Occupancy {
+    fn new(bounds: Rect) -> Self {
+        let cols = (bounds.width() / CELL).ceil().max(1.0) as usize;
+        let rows = (bounds.height() / CELL).ceil().max(1.0) as usize;
+        Self { origin: bounds.min, cols, rows, cells: vec![Vec::new(); cols * rows] }
+    }
+
+    /// The columns and rows `r` covers. A box past the edge is filed in the
+    /// edge cells, which only costs a comparison or two when asked about.
+    fn span(&self, r: Rect) -> (RangeInclusive<usize>, RangeInclusive<usize>) {
+        let cell =
+            |v: f32, o: f32, n: usize| (((v - o) / CELL).floor().max(0.0) as usize).min(n - 1);
+        let (o, c, n) = (self.origin, self.cols, self.rows);
+        (
+            cell(r.min.x, o.x, c)..=cell(r.max.x, o.x, c),
+            cell(r.min.y, o.y, n)..=cell(r.max.y, o.y, n),
+        )
+    }
+
+    fn insert(&mut self, r: Rect) {
+        let (xs, ys) = self.span(r);
+        for y in ys {
+            for x in xs.clone() {
+                self.cells[y * self.cols + x].push(r);
+            }
+        }
+    }
+
+    fn hits(&self, r: Rect) -> bool {
+        let (xs, ys) = self.span(r);
+        ys.into_iter().any(|y| {
+            xs.clone().any(|x| self.cells[y * self.cols + x].iter().any(|q| q.intersects(r)))
+        })
+    }
+}
+
 /// Which of `slots` to draw, by index, and off which corner, in draw order.
 ///
-/// The ones that must appear first, whatever they land on — but at a corner
-/// with room where there is one, so a selected target at the map's edge still
-/// shows its whole name. Then the rest in rank order, each at the first corner
-/// whose box stays inside `bounds` and misses every one already placed, or not
-/// at all.
-fn plan(slots: &[Slot], bounds: Rect) -> Vec<(usize, Corner)> {
+/// The ones that must appear first — at a corner with room where there is one,
+/// so a selected target at the map's edge still shows its whole name, and
+/// wherever it lands where there is none. Then the rest in rank order, each at
+/// the first corner whose box stays inside `bounds` and misses every symbol,
+/// every one of `marks` and every name already placed, or not at all.
+fn plan(slots: &[Slot], marks: &[Rect], bounds: Rect) -> Vec<(usize, Corner)> {
+    let mut taken = Occupancy::new(bounds);
+    for r in slots.iter().map(Slot::symbol).chain(marks.iter().copied()) {
+        taken.insert(r);
+    }
     let mut order: Vec<usize> = (0..slots.len()).collect();
     order.sort_by_key(|&i| (!slots[i].must, slots[i].rank, slots[i].key));
-    let mut placed: Vec<Rect> = Vec::new();
     let mut out = Vec::new();
     for i in order {
         let slot = &slots[i];
         let inside = |c: &Corner| bounds.contains_rect(slot.area(*c));
-        let clear = |c: &Corner| inside(c) && !placed.iter().any(|q| q.intersects(slot.area(*c)));
+        let clear = |c: &Corner| inside(c) && !taken.hits(slot.area(*c));
         let corner = match Corner::ALL.iter().find(|c| clear(c)) {
             Some(&c) => c,
             None if slot.must => Corner::ALL.into_iter().find(inside).unwrap_or(Corner::UpRight),
             None => continue,
         };
-        placed.push(slot.area(corner));
+        taken.insert(slot.area(corner));
         out.push((i, corner));
     }
     out
@@ -145,8 +215,9 @@ fn plan(slots: &[Slot], bounds: Rect) -> Vec<(usize, Corner)> {
 
 /// Lay out every name in `labels`, place the ones that fit inside `bounds`,
 /// and draw them — each off a corner of its symbol, with a tick joining the
-/// two so a crowded picture still says which name is whose.
-pub fn draw(p: &Painter, bounds: Rect, font: &FontId, labels: Vec<MapLabel>) {
+/// two so a crowded picture still says which name is whose. `marks` are
+/// anything else on the map a name must keep off, such as our own position.
+pub fn draw(p: &Painter, bounds: Rect, font: &FontId, labels: Vec<MapLabel>, marks: &[Rect]) {
     let mut slots = Vec::with_capacity(labels.len());
     let mut laid = Vec::with_capacity(labels.len());
     for label in labels {
@@ -172,7 +243,7 @@ pub fn draw(p: &Painter, bounds: Rect, font: &FontId, labels: Vec<MapLabel>) {
         });
         laid.push((label.tick_from, label.tick, galleys));
     }
-    for (i, corner) in plan(&slots, bounds) {
+    for (i, corner) in plan(&slots, marks, bounds) {
         let slot = &slots[i];
         let (tick_from, tick_colour, galleys) = &laid[i];
         let (sx, sy) = corner.signs();
@@ -215,7 +286,7 @@ mod tests {
         assert_eq!(block.left(), anchor.x + 2.0);
         // Last line's middle = anchor.y - 5; its bottom half a line below that.
         assert_eq!(block.bottom(), anchor.y - 5.0 + 5.0);
-        assert_eq!(plan(&[s], bounds()), vec![(0, Corner::UpRight)]);
+        assert_eq!(plan(&[s], &[], bounds()), vec![(0, Corner::UpRight)]);
     }
 
     /// A name with no room up and to the right — at the map's right or top
@@ -224,9 +295,9 @@ mod tests {
     /// the targets that frame the picture, on a map with nothing else on it.
     #[test]
     fn a_name_at_the_edge_moves_to_a_corner_with_room() {
-        assert_eq!(plan(&[slot(190.0, 50.0, false, 1)], bounds()), vec![(0, Corner::UpLeft)]);
-        assert_eq!(plan(&[slot(20.0, 5.0, false, 1)], bounds()), vec![(0, Corner::DownRight)]);
-        assert_eq!(plan(&[slot(190.0, 5.0, false, 1)], bounds()), vec![(0, Corner::DownLeft)]);
+        assert_eq!(plan(&[slot(190.0, 50.0, false, 1)], &[], bounds()), vec![(0, Corner::UpLeft)]);
+        assert_eq!(plan(&[slot(20.0, 5.0, false, 1)], &[], bounds()), vec![(0, Corner::DownRight)]);
+        assert_eq!(plan(&[slot(190.0, 5.0, false, 1)], &[], bounds()), vec![(0, Corner::DownLeft)]);
         // Flush right when it is on the left, so it still hugs its tick.
         let s = slot(190.0, 50.0, false, 1);
         assert_eq!(s.block(Corner::UpLeft).right(), s.anchor(Corner::UpLeft).x - 2.0);
@@ -238,6 +309,75 @@ mod tests {
         assert_eq!(below, above);
     }
 
+    /// A name keeps off other symbols and off our own mark, not only off other
+    /// names: over a neighbour it would hide where that neighbour is.
+    #[test]
+    fn a_name_keeps_off_other_symbols_and_marks() {
+        // The second symbol sits where the first one's name would go.
+        let slots = vec![slot(100.0, 50.0, false, 1), slot(130.0, 35.0, false, 3)];
+        assert_eq!(plan(&slots, &[], bounds()), vec![(0, Corner::UpLeft), (1, Corner::UpRight)]);
+        // Our own position, likewise.
+        let home = Rect::from_center_size(pos2(130.0, 35.0), vec2(15.0, 15.0));
+        let slots = vec![slot(100.0, 50.0, false, 1)];
+        assert_eq!(plan(&slots, &[home], bounds()), vec![(0, Corner::UpLeft)]);
+    }
+
+    /// A busy map, placed through the grid, gives exactly what checking every
+    /// box against every other would: each name at the first corner with room
+    /// when its turn comes, and none where no corner had any.
+    #[test]
+    fn the_grid_places_a_busy_map_as_checking_everything_would() {
+        let bounds = Rect::from_min_size(pos2(12.0, 7.0), vec2(700.0, 380.0));
+        let mut seed = 0x2545_f491_u32;
+        let mut next = move |n: u32| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) % n
+        };
+        let slots: Vec<Slot> = (0..400)
+            .map(|k| {
+                let lines = 1 + next(3) as usize;
+                Slot {
+                    at: pos2(bounds.left() + next(700) as f32, bounds.top() + next(380) as f32),
+                    r: 3.5 + next(3) as f32,
+                    size: vec2(24.0 + next(90) as f32, (lines - 1) as f32 * PITCH + 11.0),
+                    line_h: 11.0,
+                    must: next(50) == 0,
+                    rank: next(4) as u8,
+                    key: k,
+                }
+            })
+            .collect();
+        let marks = [Rect::from_center_size(bounds.center(), vec2(15.0, 15.0))];
+        let placed = plan(&slots, &marks, bounds);
+
+        let mut order: Vec<usize> = (0..slots.len()).collect();
+        order.sort_by_key(|&i| (!slots[i].must, slots[i].rank, slots[i].key));
+        let symbols: Vec<Rect> = slots.iter().map(Slot::symbol).collect();
+        let mut names: Vec<Rect> = Vec::new();
+        let mut next_placed = placed.iter().peekable();
+        for i in order {
+            let s = &slots[i];
+            let clear = |c: Corner| {
+                let a = s.area(c);
+                bounds.contains_rect(a)
+                    && !symbols.iter().chain(&marks).chain(&names).any(|q| q.intersects(a))
+            };
+            let first_clear = Corner::ALL.into_iter().find(|&c| clear(c));
+            match next_placed.next_if(|&&(j, _)| j == i) {
+                Some(&(_, corner)) => {
+                    if !s.must || first_clear.is_some() {
+                        assert_eq!(Some(corner), first_clear, "slot {i}");
+                    }
+                    names.push(s.area(corner));
+                }
+                None => assert_eq!(first_clear, None, "slot {i} was dropped with room"),
+            }
+        }
+        assert!(next_placed.next().is_none());
+        // Busy enough that most names are culled, not so busy that none fit.
+        assert!((20..200).contains(&placed.len()), "{} placed", placed.len());
+    }
+
     /// A map too busy for every name keeps the ones that say the most, by
     /// rank — the opposite of the rule this replaced, which dropped them all at
     /// once once a few dozen targets were in view (issue #408).
@@ -247,11 +387,11 @@ mod tests {
         // it: the better-ranked one wins.
         let narrow = Rect::from_min_size(pos2(0.0, 0.0), vec2(60.0, 32.0));
         let slots = vec![slot(4.0, 30.0, false, 3), slot(4.0, 30.0, false, 1)];
-        assert_eq!(plan(&slots, narrow), vec![(1, Corner::UpRight)]);
+        assert_eq!(plan(&slots, &[], narrow), vec![(1, Corner::UpRight)]);
         // Two symbols on top of each other on an open map: both names fit, one
         // either side.
         let slots = vec![slot(100.0, 50.0, false, 3), slot(100.0, 50.0, false, 1)];
-        assert_eq!(plan(&slots, bounds()), vec![(1, Corner::UpRight), (0, Corner::UpLeft)]);
+        assert_eq!(plan(&slots, &[], bounds()), vec![(1, Corner::UpRight), (0, Corner::UpLeft)]);
     }
 
     /// Two names of the same rank after the same room: the lower key wins,
@@ -261,8 +401,8 @@ mod tests {
         let narrow = Rect::from_min_size(pos2(0.0, 0.0), vec2(60.0, 32.0));
         let a = || Slot { key: 244_000_002, ..slot(4.0, 30.0, false, 1) };
         let b = || Slot { key: 244_000_001, ..slot(4.0, 30.0, false, 1) };
-        assert_eq!(only(&plan(&[a(), b()], narrow)), vec![1]);
-        assert_eq!(only(&plan(&[b(), a()], narrow)), vec![0]);
+        assert_eq!(only(&plan(&[a(), b()], &[], narrow)), vec![1]);
+        assert_eq!(only(&plan(&[b(), a()], &[], narrow)), vec![0]);
     }
 
     /// The name the operator picked or is pointing at is placed first and drawn
@@ -273,17 +413,17 @@ mod tests {
         // A must-label takes the room from a better-ranked one...
         let narrow = Rect::from_min_size(pos2(0.0, 0.0), vec2(60.0, 32.0));
         let slots = vec![slot(4.0, 30.0, true, 3), slot(4.0, 30.0, false, 0)];
-        assert_eq!(only(&plan(&slots, narrow)), vec![0]);
+        assert_eq!(only(&plan(&slots, &[], narrow)), vec![0]);
         // ...and where no corner has room it is drawn anyway, up and to the
         // right, where the painter clips it.
         let tiny = Rect::from_min_size(pos2(0.0, 0.0), vec2(20.0, 20.0));
-        assert_eq!(plan(&[slot(10.0, 10.0, true, 3)], tiny), vec![(0, Corner::UpRight)]);
+        assert_eq!(plan(&[slot(10.0, 10.0, true, 3)], &[], tiny), vec![(0, Corner::UpRight)]);
     }
 
     /// A name with no room anywhere on the map does not show, unless it must.
     #[test]
     fn a_name_with_no_room_is_dropped_unless_it_must_show() {
         let tiny = Rect::from_min_size(pos2(0.0, 0.0), vec2(20.0, 20.0));
-        assert!(plan(&[slot(10.0, 10.0, false, 0)], tiny).is_empty());
+        assert!(plan(&[slot(10.0, 10.0, false, 0)], &[], tiny).is_empty());
     }
 }
