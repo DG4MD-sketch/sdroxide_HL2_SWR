@@ -5466,6 +5466,14 @@ bottom-left corner says how much the view spans, in degrees of longitude and
 roughly in kilometres, so a chart that looks fully zoomed in but is still half
 an ocean wide says so (issue #459).
 
+Each vessel's name — and its speed, where it has one — sits up and to the right
+of its symbol, or at another corner where the edge of the chart or a neighbour
+is in the way. On a busy chart a name with no room anywhere is left off rather
+than drawn over another name or symbol: marks (buoys, base stations) give way
+first, then everything that is not a SOLAS ship, while the selected vessel, the
+one under the pointer and any in distress always keep theirs. Zoom in and the
+names come back as the room does (issue #408).
+
 #### Data fields
 
 - **slots** — how many transmissions the gate opened on. A high slot count with
