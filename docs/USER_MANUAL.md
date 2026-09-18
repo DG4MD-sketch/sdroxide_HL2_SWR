@@ -1719,7 +1719,12 @@ there and its memory scan visits every channel as before.
 press **SQL** to use the receiver's own squelch, which makes the scan stop
 exactly where the audio would have opened — one control instead of two. Note
 that with the squelch slider at `off` the scan will stop on the first channel it
-looks at, since every channel then counts as busy.
+looks at, since every channel then counts as busy. The squelch is one of the
+per-mode settings (see *Per-mode settings (the DEFAULTS chip)*), so **SQL** uses
+the squelch of the mode being scanned: a frequency scan in NFM started from
+SSB stops at NFM's squelch, which is open until you set one there, and a memory
+scan judges each channel by the squelch of the mode it was stored in. Set it
+once while the scan is running in that mode and it is remembered for next time.
 
 **Listens for** is how long it stays on a candidate before judging it. Below
 about a tenth of a second the level meter has not settled and weak signals get
