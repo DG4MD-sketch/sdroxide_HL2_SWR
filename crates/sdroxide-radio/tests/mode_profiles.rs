@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use sdroxide_radio::{
-    AudioParams, Complex32, ControlUpdate, EngineConfig, EngineHandles, IqSource, Result, rtrb,
-    start_engine,
+    AudioParams, Complex32, ControlUpdate, EngineConfig, EngineHandles, IqSource, RadioError,
+    Result, rtrb, start_engine,
 };
 use sdroxide_types::{AgcMode, Command, DeviceCaps, Mode, NrLevel, RadioEvent, RadioState, RxId};
 
@@ -71,6 +71,34 @@ impl IqSource for RigKnob {
     }
     fn poll_control(&mut self) -> Vec<ControlUpdate> {
         std::mem::take(&mut *self.knob.lock().unwrap())
+    }
+}
+
+/// [`Quiet`] until `unplug` is set, and then a front end whose link is gone:
+/// every read fails, which takes the engine down the way a pulled USB cable
+/// does.
+struct Unpluggable {
+    unplug: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl IqSource for Unpluggable {
+    fn sample_rate(&self) -> f64 {
+        Quiet.sample_rate()
+    }
+    fn center_hz(&self) -> f64 {
+        Quiet.center_hz()
+    }
+    fn set_center_hz(&mut self, _hz: f64) -> Result<()> {
+        Ok(())
+    }
+    fn read(&mut self, buf: &mut [Complex32]) -> Result<usize> {
+        if self.unplug.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(RadioError::Msg("the device went away".into()));
+        }
+        Quiet.read(buf)
+    }
+    fn describe(&self) -> String {
+        "unpluggable mock".into()
     }
 }
 
@@ -384,6 +412,35 @@ fn a_working_setups_levels_become_its_modes_own() {
         s.rx[0].mode == Mode::Usb && s.rx[0].noise_reduction == NrLevel::High
     });
     assert_eq!(s.rx[0].noise_reduction, NrLevel::High);
+    stop(h);
+}
+
+/// A change made just before the front end drops its connection is still on
+/// disk afterwards. The engine stops on a lost link without waiting for the
+/// session tick, so this is the path that shows whether the file is written on
+/// every way out or only a clean one.
+#[test]
+fn a_change_survives_the_front_end_dropping_its_connection() {
+    let _guard = CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    isolate("modeprofiles-unplugged");
+    {
+        let unplug = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let h = start_on(Box::new(Unpluggable { unplug: unplug.clone() }), Mode::Usb);
+        send(&h, Command::SetAutoNotch { rx: RxId::Main, on: true });
+        let _ = wait_for(&h, "USB's notch on", |s| s.rx[0].auto_notch);
+        unplug.store(true, std::sync::atomic::Ordering::Relaxed);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !h.thread.as_ref().is_some_and(|t| t.is_finished()) {
+            assert!(Instant::now() < deadline, "the engine never noticed the link was gone");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        stop(h);
+    }
+
+    let h = start(Mode::Usb);
+    let s =
+        wait_for(&h, "USB's remembered notch", |s| s.rx[0].mode == Mode::Usb && s.rx[0].auto_notch);
+    assert!(s.rx[0].auto_notch);
     stop(h);
 }
 

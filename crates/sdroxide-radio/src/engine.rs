@@ -4319,10 +4319,6 @@ fn engine_thread(
                     engine.rig_tx = false;
                     engine.cw_gate_until = None;
                     engine.release_tx_gate();
-                    // A change made since the last session tick still has to
-                    // reach the file, or quitting within ten seconds of making
-                    // it forgets it.
-                    engine.flush_mode_profiles();
                     info!("all controllers gone; engine stopping");
                     return;
                 }
@@ -4898,6 +4894,11 @@ impl Drop for Engine {
         // And the transmit-audio rail, for the same reason: an operator who
         // trims their level and quits has set it, not been trying it out.
         self.flush_digi_config();
+        // And the per-mode settings, on every way out and not only a clean one:
+        // a front end that drops its connection takes the engine down with a
+        // change since the last session tick still unwritten, while the session
+        // saved just above already describes it.
+        self.flush_mode_profiles();
         // Finalize any in-progress recording so the MP3 file is closed cleanly
         // when the engine thread exits (all controllers gone / fatal error).
         if let Some(rec) = self.recorder.take() {
