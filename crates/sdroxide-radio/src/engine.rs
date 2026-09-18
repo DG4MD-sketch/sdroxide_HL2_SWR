@@ -900,10 +900,11 @@ impl RxChain {
         // not early-return when the mode has not actually changed — so a rig
         // reporting its mode back can trigger it at any moment.
         self.demod = None;
-        // Every mode but these two comes from `make_demod`. Their decoders link
-        // a vendored C library, which `sdroxide-dsp` cannot depend on and
-        // still build for the browser, so they are constructed here instead —
-        // see `Demodulator::take_drm` and `Demodulator::take_hd_radio`.
+        // Every mode but these two comes from `make_demod`. Their decoders are
+        // C libraries — DRM's linked in, HD Radio's loaded at run time — which
+        // `sdroxide-dsp` cannot depend on and still build for the browser, so
+        // they are constructed here instead — see `Demodulator::take_drm` and
+        // `Demodulator::take_hd_radio`.
         self.demod = match rx.mode {
             Mode::Drm => Some(Box::new(DrmDemod::new(self.ddc.out_rate())) as Box<dyn Demodulator>),
             Mode::HdRadio => {
@@ -3541,6 +3542,10 @@ fn engine_thread(
     // Published so every UI attached to this engine — including a remote one
     // started by somebody else — can warn about it.
     state.oob_tx = !engine_cfg.tx_ham_only;
+    // Whether this machine has an nrsc5 to decode HD Radio with. Asked here, on
+    // the machine the decoder would run on, so a remote client greys the mode
+    // out for the station's reason rather than its own.
+    state.hd_radio_unavailable = sdroxide_nrsc5::unavailable_reason().map(str::to_string);
     // Seeded here, next to the other config-derived state, so the very first
     // broadcast carries the real guard settings and no client ever renders the
     // 0.0 that `TxState::default()` would give it.

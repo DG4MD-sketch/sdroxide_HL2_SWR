@@ -55,9 +55,9 @@ jobs:
         shell: bash
     steps:
       # `submodules` pulls vendor/rade_c (the RADE codec), vendor/faad2 (the AAC
-      # decoder the DRM and HD Radio receivers are built with), vendor/nrsc5
-      # (the HD Radio receiver, which also carries the faad2 HDC patch applied
-      # at build time) and vendor/rtl_433.
+      # decoder the DRM receiver is built with) and vendor/rtl_433. HD Radio's
+      # decoder is not among them: it is the machine's own libnrsc5, loaded at
+      # run time and never bundled (issue #488).
       - uses: actions/checkout@v7
         with:
           submodules: recursive

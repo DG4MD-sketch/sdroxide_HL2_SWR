@@ -1,15 +1,23 @@
 //! End-to-end decode check against nrsc5's own sample capture.
 //!
-//! `vendor/nrsc5/support/sample.xz` is upstream's CI fixture: a few seconds of
-//! FM HD Radio, decoded by upstream's CLI to prove a build works (their
-//! workflow watches the log for the station text). Piping it through this
-//! crate instead proves the whole chain here — the vendored library, the FFTW
-//! stand-in and the patched faad2 link all at once.
+//! `support/sample.xz` in the nrsc5 repository is upstream's CI fixture: a few
+//! seconds of FM HD Radio (KUT), decoded by upstream's CLI to prove a build
+//! works (their workflow watches the log for the station text). Piping it
+//! through this crate instead proves the whole chain here against the
+//! `libnrsc5` the machine has: the library found and loaded, the event layout
+//! read correctly out of it, and its HDC audio coming back.
 //!
 //! Defaults to ignored: it decompresses ~48 MB and decodes in real-ish time
-//! per sample, so it is not part of the ordinary `cargo test` run. Run with
-//! `cargo test -p sdroxide-nrsc5 --release -- --ignored --nocapture`. The `xz`
-//! binary must be on PATH.
+//! per sample, so it is not part of the ordinary `cargo test` run. It needs the
+//! capture named by `SDROXIDE_NRSC5_SAMPLE`, the `xz` binary on PATH, and a
+//! `libnrsc5` (`SDROXIDE_NRSC5_LIB` names one outside the usual places):
+//!
+//! ```text
+//! SDROXIDE_NRSC5_SAMPLE=~/src/nrsc5/support/sample.xz \
+//!     cargo test -p sdroxide-nrsc5 --release -- --ignored --nocapture
+//! ```
+//!
+//! Each skips, saying why, when any of the three is missing.
 
 use std::io::Read;
 use std::path::PathBuf;
@@ -20,15 +28,27 @@ use num_complex::Complex32;
 
 use sdroxide_nrsc5::{Event, HdReceiver, Mode};
 
+/// The capture, where there is one and a library to decode it with.
+fn sample() -> Option<PathBuf> {
+    let Some(sample) = std::env::var_os("SDROXIDE_NRSC5_SAMPLE").map(PathBuf::from) else {
+        eprintln!("skipping: set SDROXIDE_NRSC5_SAMPLE to nrsc5's support/sample.xz");
+        return None;
+    };
+    if !sample.exists() {
+        eprintln!("skipping: {} does not exist", sample.display());
+        return None;
+    }
+    if let Some(why) = sdroxide_nrsc5::unavailable_reason() {
+        eprintln!("skipping: {why}");
+        return None;
+    }
+    Some(sample)
+}
+
 #[test]
 #[ignore = "decompresses 48 MB and decodes for several seconds"]
 fn decode_sample_capture() {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let sample = manifest.join("../../vendor/nrsc5/support/sample.xz");
-    if !sample.exists() {
-        eprintln!("skipping: {} missing (submodules not fetched?)", sample.display());
-        return;
-    }
+    let Some(sample) = sample() else { return };
 
     // xz -dc streams the CU8 I/Q directly into the pipe.
     let mut child = match Command::new("xz")
@@ -79,7 +99,10 @@ fn decode_sample_capture() {
 
     assert!(got.syncs > 0, "no sync event — the receive path never locked onto the capture");
     assert!(!got.text.is_empty(), "no station name/slogan/message was decoded from the capture");
-    assert!(got.audio_frames > 0, "no decoded audio — HDC/faad2 path never produced samples");
+    assert!(
+        got.sounding_frames > 0,
+        "no decoded audio — only filled-in silence, so the HDC decoder never produced sound"
+    );
     eprintln!("station text: {}", got.text.join(" | "));
 }
 
@@ -100,12 +123,7 @@ fn decode_sample_capture_through_the_demod() {
     /// `NRSC5_SAMPLE_RATE_CU8`: the capture is at twice the decoder's own rate.
     const CU8_RATE: f64 = 1_488_375.0;
 
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let sample = manifest.join("../../vendor/nrsc5/support/sample.xz");
-    if !sample.exists() {
-        eprintln!("skipping: {} missing (submodules not fetched?)", sample.display());
-        return;
-    }
+    let Some(sample) = sample() else { return };
     let Ok(mut child) = Command::new("xz")
         .args(["-dc", sample.to_str().unwrap()])
         .stdout(Stdio::piped())
@@ -174,6 +192,8 @@ struct Summary {
     syncs: usize,
     lost_syncs: usize,
     audio_frames: usize,
+    /// Frames that were sound rather than filled-in silence.
+    sounding_frames: usize,
     audio_samples: usize,
     text: Vec<String>,
 }
@@ -183,8 +203,9 @@ impl Summary {
         match ev {
             Event::Sync { .. } => self.syncs += 1,
             Event::LostSync => self.lost_syncs += 1,
-            Event::Audio { data, .. } => {
+            Event::Audio { data, unavailable, .. } => {
                 self.audio_frames += 1;
+                self.sounding_frames += usize::from(!unavailable);
                 self.audio_samples += data.len();
             }
             Event::StationName(s) | Event::StationSlogan(s) | Event::StationMessage(s) => {

@@ -10,7 +10,7 @@
 //!   comes back now was transmitted a fraction of a second ago;
 //! * the decoder produces audio at its own rate (44.1 kHz), not ours, so the
 //!   two are rate-matched here rather than assumed equal;
-//! * the decoder is a vendored C library, and on a pipe it does all of its work
+//! * the decoder is a C library, and on a pipe it does all of its work
 //!   inside the call that hands it samples. So it runs on a thread of its own
 //!   (see `src/worker.rs`): this side queues channel I/Q for it and plays
 //!   back what it has decoded, and nothing heavier than a copy happens on the
@@ -86,7 +86,14 @@ impl HdDemod {
     /// `channel_rate`.
     pub fn new(channel_rate: f64) -> Self {
         let mut unavailable = None;
-        let worker = if channel_rate < MIN_CHANNEL_RATE_HZ {
+        // The machine before the stream: no rate helps without the library.
+        let worker = if let Some(why) = crate::unavailable_reason() {
+            unavailable = Some(why.to_string());
+            None
+        } else if crate::worker::library_cannot_play() {
+            unavailable = Some(crate::worker::NO_AUDIO_DECODER_WHY.to_string());
+            None
+        } else if channel_rate < MIN_CHANNEL_RATE_HZ {
             let why = format!(
                 "HD Radio needs at least {:.0} kHz of stream to hold both digital sidebands, \
                  and this one is {:.1} kHz — raise the device sample rate, or use a receiver \
@@ -344,13 +351,17 @@ mod tests {
     }
 
     /// A stream too narrow for the digital sidebands starts no decoder, and the
-    /// status says why, naming the rate.
+    /// status says why, naming the rate — unless there is no library at all,
+    /// which no rate would fix and so is said first.
     #[test]
     fn a_channel_too_narrow_for_the_sidebands_says_so() {
         let mut demod = HdDemod::new(48_000.0);
         let status = demod.take_hd_radio().expect("the reason is published");
         let why = status.unavailable.expect("unavailable");
-        assert!(why.contains("48.0 kHz"), "{why}");
+        match crate::unavailable_reason() {
+            Some(missing) => assert_eq!(why, missing),
+            None => assert!(why.contains("48.0 kHz"), "{why}"),
+        }
         assert!(demod.take_hd_radio().is_none(), "once, not every poll");
         let mut out = Vec::new();
         demod.process(&[Complex32::new(0.1, 0.0); 480], &mut out);

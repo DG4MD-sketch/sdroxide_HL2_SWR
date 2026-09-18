@@ -386,8 +386,13 @@ pub(crate) fn apply_action(
         }
         BandSelect(b) => cmds.push(Command::SetBand(b)),
         ModeNext | ModePrev => {
-            let all = sdroxide_types::Mode::ALL;
-            let i = all.iter().position(|m| *m == state.rx[0].mode).unwrap_or(0);
+            // Past a mode the station cannot run, as the greyed-out chip is.
+            let cur = state.rx[0].mode;
+            let all: Vec<_> = sdroxide_types::Mode::ALL
+                .into_iter()
+                .filter(|m| *m == cur || state.mode_unavailable(*m).is_none())
+                .collect();
+            let i = all.iter().position(|m| *m == cur).unwrap_or(0);
             let n = all.len();
             let i = if act == ModeNext { (i + 1) % n } else { (i + n - 1) % n };
             cmds.push(Command::SetMode { rx, mode: all[i] });
@@ -1143,6 +1148,42 @@ mod tests {
         );
         assert_eq!(state.vfo_a_hz, 14_074_300.0);
         assert_eq!(cmds, vec![Command::SetVfo { vfo: Vfo::A, hz: 14_074_300.0 }]);
+    }
+
+    /// Stepping through the modes passes HD Radio by where the station has no
+    /// nrsc5, as the greyed-out chip does (issue #488), and stops on it where
+    /// the station has one.
+    #[test]
+    fn mode_stepping_passes_a_mode_the_station_cannot_run() {
+        let step = |from: Mode, act: Action, unavailable: bool| {
+            let mut state = RadioState::default();
+            state.rx[0].mode = from;
+            state.hd_radio_unavailable = unavailable.then(|| "no libnrsc5 here".to_string());
+            let mut view = ViewState::default();
+            let mut flags = [false; 6];
+            let mut speech_acts = Vec::new();
+            let mut ui = sink(&mut view, &mut flags, &mut speech_acts);
+            let mut cmds = Vec::new();
+            apply_action(
+                act,
+                ActionInput::Press,
+                ButtonMode::Momentary,
+                &mut state,
+                &mut ui,
+                &mut cmds,
+            );
+            match cmds.as_slice() {
+                [Command::SetMode { mode, .. }] => *mode,
+                other => panic!("{other:?}"),
+            }
+        };
+        // DRM, HD Radio and ADS-B sit side by side in `Mode::ALL`.
+        assert_eq!(step(Mode::Drm, Action::ModeNext, false), Mode::HdRadio);
+        assert_eq!(step(Mode::Drm, Action::ModeNext, true), Mode::Adsb);
+        assert_eq!(step(Mode::Adsb, Action::ModePrev, true), Mode::Drm);
+        // Already in it — selected some other way — stepping still moves on
+        // from where the radio is, rather than from the top of the list.
+        assert_eq!(step(Mode::HdRadio, Action::ModeNext, true), Mode::Adsb);
     }
 
     /// Issue #136: a step lands on the step *grid*. Panadapter dragging tunes

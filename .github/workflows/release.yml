@@ -113,9 +113,9 @@ jobs:
           fi
 
       # `submodules` pulls vendor/rade_c (the RADE codec), vendor/faad2 (the AAC
-      # decoder the DRM and HD Radio receivers are built with), vendor/nrsc5
-      # (the HD Radio receiver, which also carries the faad2 HDC patch applied
-      # at build time) and vendor/rtl_433.
+      # decoder the DRM receiver is built with) and vendor/rtl_433. HD Radio's
+      # decoder is not among them: it is the machine's own libnrsc5, loaded at
+      # run time and never bundled (issue #488).
       - uses: actions/checkout@v7
         with:
           submodules: recursive
@@ -326,6 +326,13 @@ jobs:
           fi
           cat >> stage/sdroxide/README.txt <<'EOF'
 
+          HD Radio (the digital sidecar of North American FM stations) needs
+          nrsc5's decoder library, libnrsc5.so, which is not bundled: sdroxide
+          loads it at startup when it is there. Install nrsc5 from
+          https://github.com/theori-io/nrsc5 (on Arch, the nrsc5-git AUR
+          package), or put libnrsc5.so beside the sdroxide executable. Without
+          it the HD RADIO mode is shown greyed out, and hovering it says why.
+
           To add sdroxide to your desktop menu, run ./install-desktop-entry.sh
           (per-user, no root needed; --uninstall removes it again). The .deb
           package registers the menu entry automatically.
@@ -512,6 +519,13 @@ jobs:
           # note. Zadig is the only Windows-side setup either receiver needs.
           cat >> stage/sdroxide/README.txt <<'EOF'
 
+          HD Radio (the digital sidecar of North American FM stations) needs
+          nrsc5's decoder library, libnrsc5.dll, which is not bundled: put it,
+          and the DLLs it depends on, beside sdroxide.exe. nrsc5 publishes no
+          Windows download; it builds with MSYS2 (see
+          https://github.com/theori-io/nrsc5). Without it the HD RADIO mode is
+          shown greyed out, and hovering it says why.
+
           USB receivers: Windows has no driver bound to an RTL-SDR or RX-888
           out of the box. Use Zadig (https://zadig.akeo.ie/) to bind the device
           to WinUSB — for the RX-888 do this for BOTH of its USB ids,
@@ -611,6 +625,12 @@ jobs:
           EOF
           fi
           cat >> stage/sdroxide/README.txt <<'EOF'
+
+          HD Radio (the digital sidecar of North American FM stations) needs
+          nrsc5's decoder library, libnrsc5.dylib, which is not bundled: build
+          and install nrsc5 from https://github.com/theori-io/nrsc5, which puts
+          it in /usr/local/lib, where sdroxide looks. Without it the HD RADIO
+          mode is shown greyed out, and hovering it says why.
 
           LICENSE-rx888-firmware.txt covers the RX-888 FX3 firmware image that
           is bundled in the binary and uploaded to the receiver; it is MIT

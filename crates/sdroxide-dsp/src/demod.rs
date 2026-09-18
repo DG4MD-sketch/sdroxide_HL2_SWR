@@ -107,7 +107,7 @@ pub trait Demodulator: Send {
     /// the HD Radio one whenever nothing has moved.
     ///
     /// The same arrangement as [`Self::take_drm`]: the HD Radio demodulator
-    /// lives in `sdroxide-nrsc5`, which links a vendored C library, so only the
+    /// lives in `sdroxide-nrsc5`, which loads a C library, so only the
     /// snapshot type is shared and this is a trait method with a default rather
     /// than another arm of [`make_demod`].
     fn take_hd_radio(&mut self) -> Option<sdroxide_types::HdRadioStatus> {

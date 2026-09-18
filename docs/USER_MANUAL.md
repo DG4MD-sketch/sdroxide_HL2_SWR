@@ -2642,6 +2642,27 @@ Select **HD RADIO** on the **MODE** button and listen. It is a **broadcast** mod
 like WFM and DRM: there is nothing to transmit and no transcript. The panel is
 receive-only.
 
+**It needs nrsc5 installed.** The decoder is **libnrsc5**, from the
+[nrsc5](https://github.com/theori-io/nrsc5) project, and sdroxide does not
+include it: HD Radio's audio codec is proprietary, so the library is looked for
+on the computer the radio runs on when sdroxide starts, and used if it is there.
+Without it **HD RADIO** stays on the **MODE** button but greyed out — hover it
+for the reason — and the keyboard's next/previous-mode keys step past it. On
+Arch it is the `nrsc5-git` AUR package; elsewhere it is usually built from the
+nrsc5 source, whose `sudo make install` puts it in `/usr/local/lib`, where
+sdroxide looks. On Windows, put `libnrsc5.dll` and the DLLs it needs beside
+`sdroxide.exe`; anywhere, `libnrsc5` beside the executable is found, and the
+`SDROXIDE_NRSC5_LIB` environment variable names a library in any other place.
+**Restart sdroxide after installing it** — the library is looked for once, at
+startup. With a remote client it is the *station's* computer that needs it, not
+the one the client runs on.
+
+An nrsc5 built without its audio decoder (`-DUSE_FAAD2=OFF`, which a
+distribution unwilling to ship the patched codec might do) can find a station
+and read its name but never play it. sdroxide notices after a couple of seconds
+of locked signal with no audio at all, stops decoding, and the HD Radio window
+says so.
+
 **Tuning.** Put the dial on the **analog carrier's centre**, the same number you
 would use for plain WFM. Unlike DRM, the digital carriers are not centred on
 that frequency but spread out around it — roughly 129 to 198 kHz either side —

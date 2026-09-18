@@ -17,9 +17,8 @@
 //! * **faad2 at runtime** — Dream dlopens `libfaad_drm.so.2`, which most
 //!   systems do not have. It is linked in from `crates/sdroxide-faad2` instead,
 //!   so DRM audio decodes out of the box, which is the whole point of the
-//!   feature. That crate builds the one faad2 the binary has — `DRM_SUPPORT`
-//!   for this receiver, `HDC_SUPPORT` for the HD Radio decoder — and Dream is
-//!   compiled against the headers it exports.
+//!   feature. That crate builds the one faad2 the binary has — stock, with
+//!   `DRM_SUPPORT` — and Dream is compiled against the headers it exports.
 
 use std::path::{Path, PathBuf};
 
@@ -160,7 +159,7 @@ fn main() {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let dream = manifest.join("../../vendor/dream");
-    // The patched faad2 headers, exported by `sdroxide-faad2`'s build script.
+    // The faad2 headers, exported by `sdroxide-faad2`'s build script.
     let faad2_include = PathBuf::from(
         std::env::var("DEP_FAAD2_INCLUDE").expect("sdroxide-faad2 exports its include directory"),
     );

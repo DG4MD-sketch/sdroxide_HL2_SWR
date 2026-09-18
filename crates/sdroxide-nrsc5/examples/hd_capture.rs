@@ -47,6 +47,12 @@ fn main() {
         )
         .with_writer(std::io::stderr)
         .init();
+    // Without a library the demod starts no decoder and this would report a
+    // capture that never locks; say what is missing instead.
+    if let Some(why) = sdroxide_nrsc5::unavailable_reason() {
+        eprintln!("{why}\n(set {} to a libnrsc5 to use one elsewhere)", sdroxide_nrsc5::LIB_ENV);
+        std::process::exit(1);
+    }
     let a: Vec<String> = env::args().skip(1).collect();
     let (path, centre, chan) = (&a[0], a[1].parse::<f64>().unwrap(), a[2].parse::<f64>().unwrap());
     // The capture rate is not fixed: `--record-iq` files come at whatever the

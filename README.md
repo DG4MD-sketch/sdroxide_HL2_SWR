@@ -1062,6 +1062,19 @@ brew install pkg-config cmake autoconf automake libtool opus
   Debian/Ubuntu, `libfdk-aac` on Arch, `brew install fdk-aac` on macOS, or
   `libfdk-aac-2.dll` beside the executable on Windows. See
   `vendor/fdk-aac/PROVENANCE.md`.
+- **libnrsc5** is optional and a *runtime* dependency as well. It is nrsc5's
+  decoder library, which **HD Radio** is decoded with, and none of it is built
+  into sdroxide: HD Radio's HDC audio codec is proprietary, and the patched
+  faad2 that decodes it lives inside that library. sdroxide looks for it at
+  startup; without it the **HD RADIO** mode is greyed out and says why. Few
+  distributions package it (`nrsc5-git` on the AUR, `nrsc5` in nixpkgs), so it
+  is usually built from [theori-io/nrsc5](https://github.com/theori-io/nrsc5)
+  with its own CMake — `sudo make install` puts it in `/usr/local/lib`, where
+  sdroxide looks too. Beside the executable works on every platform, and
+  `SDROXIDE_NRSC5_LIB` names one anywhere else. It has been checked against
+  nrsc5 3.2.0 and upstream's current master. A library built with
+  `-DUSE_FAAD2=OFF` finds stations but cannot play them, and the HD Radio
+  window says that as well.
 
 For the **SoapySDR** backend you need its development libraries and the driver
 module(s) for your radio (e.g. `soapysdr`, `soapysdr-module-hackrf`,

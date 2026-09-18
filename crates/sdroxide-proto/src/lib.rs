@@ -1371,7 +1371,15 @@ use sdroxide_types::{
 /// profiles themselves travel as receiver state, so a v154 peer's state decode
 /// is unchanged; it just cannot ask for a reset. Numbered after ACARS because
 /// that landed upstream first (the two were in flight together).
-pub const PROTO_VERSION: u16 = 155;
+///
+/// v156: HD Radio's decoder is `libnrsc5`, loaded at run time rather than built
+/// in (issue #488), so whether the mode works is the station's to say.
+/// [`sdroxide_types::RadioState`] gains `hd_radio_unavailable`, the reason to
+/// show on the greyed-out mode. Appended last, but postcard numbers struct
+/// fields by position: a v155 peer reads the extra bytes as the start of
+/// whatever follows the state, and fails to decode `HelloAck` and every state
+/// update.
+pub const PROTO_VERSION: u16 = 156;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]
@@ -2480,6 +2488,29 @@ mod tests {
         // And a mode with no entry still reaches the carrier default across the
         // wire, which is the property that makes the map need no migration.
         assert_eq!(s.config.tx_level_for(Mode::Psk), 1.0);
+    }
+
+    /// Why HD Radio is greyed out is the station's to say, and it reaches a
+    /// remote client on the state, in the connect reply and in every update.
+    #[test]
+    fn roundtrip_hd_radio_unavailable() {
+        let state = RadioState {
+            hd_radio_unavailable: Some("no libnrsc5 on the station".into()),
+            ..RadioState::default()
+        };
+        let msgs = [
+            ServerMsg::State(state.clone()),
+            ServerMsg::HelloAck {
+                proto: PROTO_VERSION,
+                caps: DeviceCaps::default(),
+                state,
+                rx_codec: AudioCodec::Opus48kMono,
+                tx_codec: AudioCodec::Pcm16_48k,
+            },
+        ];
+        for m in &msgs {
+            assert_eq!(&decode::<ServerMsg>(&encode(m).unwrap()).unwrap(), m);
+        }
     }
 
     /// Whether CW leaves as audio is a capability, and the client needs it to

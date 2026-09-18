@@ -1,9 +1,15 @@
-//! HD Radio (NRSC-5) decoding, wrapping the vendored `nrsc5` library.
+//! HD Radio (NRSC-5) decoding, through the `libnrsc5` installed on the machine.
 //!
 //! The crate is the decoder for the HD Radio band: it takes raw I/Q samples
 //! (via `HdReceiver::pipe_*`, at nrsc5's native sample rate — see the
 //! `NRSC5_SAMPLE_RATE_*` definitions upstream) and turns them into decoded
 //! audio and the SIS/ID3 metadata broadcasters send.
+//!
+//! nrsc5 is not built in: `src/ffi.rs` finds its shared library at run time,
+//! and [`unavailable_reason`] is the sentence to show where there is none. That
+//! is also what keeps its HDC audio codec — a patched faad2 the library carries
+//! inside itself — out of sdroxide, and out of the way of the stock faad2 the
+//! DRM receiver links (issue #488).
 //!
 //! [`HdReceiver`] is a thin binding on purpose. Opened on a pipe, the C library
 //! runs no thread of its own: each `pipe_*` call does the decoding and fires
@@ -18,28 +24,21 @@
 //! station / SIS
 //! events; the finer data services (LOT files, HERE images, ID3 tags, the SIG
 //! table) are decoded inside the library but not yet surfaced here.
-//!
-//! # Linking faad2
-//!
-//! nrsc5 decodes its HDC audio with faad2's `NeAACDec*` symbols. They come
-//! from `sdroxide-faad2`, the one faad2 archive in the binary — upstream faad2
-//! with nrsc5's HDC patch applied at build time, shared with the DRM receiver.
-//! Two faad2 copies in the same binary must never happen: they collide on
-//! every `NeAACDec*` symbol.
 
 #![deny(missing_docs)]
 
 pub mod demod;
+mod ffi;
 mod worker;
 pub use demod::HdDemod;
+pub use ffi::{LIB_ENV, unavailable_reason};
 
-// Named so its faad2 archive is linked: nrsc5 calls `NeAACDec*` from C, which
-// Rust cannot see.
-use sdroxide_faad2 as _;
-
+use std::cell::RefCell;
 use std::ffi::{c_char, c_float, c_int, c_uint, c_void};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc::{self, Receiver};
+
+use ffi::{Api, NrsCtx};
 
 /// The analogue source the decoder expects to see.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,10 +81,24 @@ pub enum Event {
         /// Signed 16-bit PCM, left and right interleaved, 44,100 frames per
         /// second.
         data: Vec<i16>,
-        /// `NRSC5_AUDIO_FLAGS_*`. With [`AUDIO_FLAG_UNAVAILABLE`] set the frame
-        /// is silence the decoder filled in for a packet that was missing or
-        /// failed its check, not sound from the station.
-        flags: u32,
+        /// The frame is the silence the decoder fills in for a packet that was
+        /// missing or failed to decode, not sound from the station.
+        ///
+        /// Read off the samples: every nrsc5 since 3.0 fills such a slot from
+        /// one zeroed buffer, but only master says so, in a `flags` member that
+        /// an older library leaves uninitialised. A station airing digital
+        /// silence therefore reads as unavailable too, which is the one case
+        /// the two ways of telling disagree on, and a harmless one.
+        unavailable: bool,
+    },
+    /// A packet of coded HDC audio arrived, before decoding.
+    ///
+    /// Only its arrival is reported. A library built without its audio decoder
+    /// (`USE_FAAD2=OFF`) sends these and never an [`Event::Audio`], not even
+    /// filled-in silence, and that is how one is told apart.
+    HdcPacket {
+        /// The program the packet belongs to.
+        program: u8,
     },
     /// An audio service is available on the wave (from SIS descriptors).
     AudioService {
@@ -104,13 +117,11 @@ pub enum Event {
     StationMessage(String),
 }
 
-/// `NRSC5_AUDIO_FLAGS_UNAVAILABLE`: an [`Event::Audio`] frame that is silence
-/// standing in for audio the decoder did not have.
-pub const AUDIO_FLAG_UNAVAILABLE: u32 = 1 << 0;
-
 /// Errors opening or driving an `HdReceiver`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NrsError {
+    /// There is no `libnrsc5` to open — see [`unavailable_reason`].
+    Unavailable,
     /// The library rejected the open or the mode switch.
     Open,
     /// A pipe call rejected its arguments (length not matching the format).
@@ -126,9 +137,13 @@ pub enum NrsError {
 /// receiver detaches the callback before the library is closed, so no callback
 /// can outlive it.
 pub struct HdReceiver {
+    api: &'static Api,
     st: *mut NrsCtx,
     rx: Receiver<Event>,
     sink: Box<CbSink>,
+    /// The `cs16` copy of a `cf32` block, for a library without
+    /// `nrsc5_pipe_samples_cf32`.
+    cs16: RefCell<Vec<i16>>,
 }
 
 // The C handle is only touched from the (single) calling thread after the
@@ -138,20 +153,21 @@ unsafe impl Send for HdReceiver {}
 impl HdReceiver {
     /// Opens an HD Radio session in the given mode and starts its worker.
     pub fn open(mode: Mode) -> Result<Self, NrsError> {
+        let api = ffi::api().map_err(|_| NrsError::Unavailable)?;
         let mut st: *mut NrsCtx = std::ptr::null_mut();
-        if unsafe { nrsc5_open_pipe(&mut st) } != 0 || st.is_null() {
+        if unsafe { (api.open_pipe)(&mut st) } != 0 || st.is_null() {
             return Err(NrsError::Open);
         }
-        if unsafe { nrsc5_set_mode(st, mode as c_int) } != 0 {
-            unsafe { nrsc5_close(st) };
+        if unsafe { (api.set_mode)(st, mode as c_int) } != 0 {
+            unsafe { (api.close)(st) };
             return Err(NrsError::Open);
         }
         let (tx, rx) = mpsc::channel();
         let sink = Box::new(CbSink { tx, audio_program: AtomicI32::new(-1) });
         let opaque = &*sink as *const CbSink as *mut c_void;
-        unsafe { nrsc5_set_callback(st, Some(trampoline), opaque) };
-        unsafe { nrsc5_start(st) };
-        Ok(HdReceiver { st, rx, sink })
+        unsafe { (api.set_callback)(st, Some(trampoline), opaque) };
+        unsafe { (api.start)(st) };
+        Ok(HdReceiver { api, st, rx, sink, cs16: RefCell::new(Vec::new()) })
     }
 
     /// Pipes raw 8-bit unsigned I/Q samples (2 bytes per complex sample).
@@ -161,7 +177,7 @@ impl HdReceiver {
     /// boundaries. Feed at `NRSC5_SAMPLE_RATE_CU8` (1,488,375 S/s).
     pub fn pipe_cu8(&self, samples: &[u8]) -> Result<(), NrsError> {
         let len = c_uint::try_from(samples.len()).map_err(|_| NrsError::Pipe)?;
-        if unsafe { nrsc5_pipe_samples_cu8(self.st, samples.as_ptr(), len) } != 0 {
+        if unsafe { (self.api.pipe_cu8)(self.st, samples.as_ptr(), len) } != 0 {
             return Err(NrsError::Pipe);
         }
         Ok(())
@@ -174,24 +190,39 @@ impl HdReceiver {
     /// calls. Handing it twice that, as a byte count, had the library read as
     /// far again past the end of the slice. Feed at the native FM (744,187.5 S/s)
     /// or AM (46,511.71875 S/s) rate, like [`Self::pipe_cf32`].
+    ///
+    /// The scale is the library's, and it moved: up to 3.2.0 the values go in
+    /// as they are, where full scale off an 8-bit dongle is ±8192; later ones
+    /// read ±32768 as full scale.
     pub fn pipe_cs16(&self, samples: &[i16]) -> Result<(), NrsError> {
         let len = c_uint::try_from(samples.len()).map_err(|_| NrsError::Pipe)?;
-        if unsafe { nrsc5_pipe_samples_cs16(self.st, samples.as_ptr(), len) } != 0 {
+        if unsafe { (self.api.pipe_cs16)(self.st, samples.as_ptr(), len) } != 0 {
             return Err(NrsError::Pipe);
         }
         Ok(())
     }
 
-    /// Pipes single-precision complex I/Q samples (2 floats per sample).
+    /// Pipes single-precision complex I/Q samples (2 floats per sample), where
+    /// ±1.0 is the full scale of an 8-bit dongle.
     ///
     /// `samples.len()` is in floats and must be even. Feed at the native FM
     /// (744,187.5 S/s) or AM (46,511.71875 S/s) rate.
+    ///
+    /// A library without `nrsc5_pipe_samples_cf32` — every release up to 3.2.0
+    /// — gets the block as `cs16` instead, scaled to the ±8192 its own 8-bit
+    /// input path produces, so the two arrive at the same level.
     pub fn pipe_cf32(&self, samples: &[c_float]) -> Result<(), NrsError> {
         let len = c_uint::try_from(samples.len()).map_err(|_| NrsError::Pipe)?;
-        if unsafe { nrsc5_pipe_samples_cf32(self.st, samples.as_ptr(), len) } != 0 {
-            return Err(NrsError::Pipe);
+        if let Some(pipe_cf32) = self.api.pipe_cf32 {
+            if unsafe { pipe_cf32(self.st, samples.as_ptr(), len) } != 0 {
+                return Err(NrsError::Pipe);
+            }
+            return Ok(());
         }
-        Ok(())
+        let mut cs16 = self.cs16.borrow_mut();
+        cs16.clear();
+        cs16.extend(samples.iter().map(|&x| cf32_to_legacy_cs16(x)));
+        self.pipe_cs16(&cs16)
     }
 
     /// Copy out the audio of one programme only, or of every programme with
@@ -219,10 +250,19 @@ impl Drop for HdReceiver {
     fn drop(&mut self) {
         // Detach the callback first: the sink boxed on the receive side must
         // not be reachable once the worker is joined below.
-        unsafe { nrsc5_set_callback(self.st, None, std::ptr::null_mut()) };
-        unsafe { nrsc5_stop(self.st) };
-        unsafe { nrsc5_close(self.st) };
+        unsafe { (self.api.set_callback)(self.st, None, std::ptr::null_mut()) };
+        unsafe { (self.api.stop)(self.st) };
+        unsafe { (self.api.close)(self.st) };
     }
+}
+
+/// What full scale off an 8-bit dongle is in the `cs16` a library up to 3.2.0
+/// reads: its own `U8_Q15` turns `0..=255` into `(x - 127) * 64`.
+const LEGACY_CS16_FULL_SCALE: f32 = 8192.0;
+
+/// One `cf32` value as that `cs16`, saturating rather than wrapping.
+fn cf32_to_legacy_cs16(x: f32) -> i16 {
+    (x * LEGACY_CS16_FULL_SCALE).round().clamp(i16::MIN as f32, i16::MAX as f32) as i16
 }
 
 /// Iterator over the events queued at the moment `drain` was called.
@@ -265,12 +305,16 @@ unsafe extern "C" fn trampoline(evt: *const NrsEvent, opaque: *mut c_void) {
 // STATION_MESSAGE, STATION_LOCATION, ...
 //
 // These numbers and the `#[repr(C)]` structs below are copied from the header
-// by hand, so `src/layout_check.c` mirrors them in C and fails the build if the
-// pinned nrsc5 no longer agrees. Change the two together.
+// by hand, and the library they are read against is whichever one the machine
+// has. They were measured against the headers of v3.1.0, v3.2.0 and master
+// (0225922): every number and every member read here is the same in all three,
+// and in v3.0 bar the sync payload. The `layout` test pins the offsets that
+// measurement found.
 const NRS_EVENT_SYNC: c_uint = 2;
 const NRS_EVENT_LOST_SYNC: c_uint = 3;
 const NRS_EVENT_MER: c_uint = 4;
 const NRS_EVENT_BER: c_uint = 5;
+const NRS_EVENT_HDC: c_uint = 6;
 const NRS_EVENT_AUDIO: c_uint = 7;
 const NRS_EVENT_AUDIO_SERVICE: c_uint = 14;
 const NRS_EVENT_STATION_NAME: c_uint = 16;
@@ -284,22 +328,24 @@ unsafe fn translate(evt: *const NrsEvent) -> Option<Event> {
     }
     let e = unsafe { &*evt };
     match e.event {
-        NRS_EVENT_SYNC => Some(Event::Sync {
-            freq_offset: unsafe { e.u.sync.freq_offset },
-            psmi: unsafe { e.u.sync.psmi },
-        }),
+        NRS_EVENT_SYNC => {
+            let (freq_offset, psmi) = unsafe { (e.u.sync.freq_offset, e.u.sync.psmi) };
+            Some(Event::Sync { freq_offset: sane_offset(freq_offset), psmi: sane_psmi(psmi) })
+        }
         NRS_EVENT_LOST_SYNC => Some(Event::LostSync),
         NRS_EVENT_MER => {
             Some(Event::Mer { lower: unsafe { e.u.mer.lower }, upper: unsafe { e.u.mer.upper } })
         }
         NRS_EVENT_BER => Some(Event::Ber { cber: unsafe { e.u.ber.cber } }),
+        NRS_EVENT_HDC => Some(Event::HdcPacket { program: unsafe { e.u.hdc.program } as u8 }),
         NRS_EVENT_AUDIO => {
             let a = unsafe { e.u.audio };
             if a.data.is_null() || a.count == 0 {
                 return None;
             }
             let data = unsafe { std::slice::from_raw_parts(a.data, a.count) }.to_vec();
-            Some(Event::Audio { program: a.program as u8, data, flags: a.flags })
+            let unavailable = data.iter().all(|&s| s == 0);
+            Some(Event::Audio { program: a.program as u8, data, unavailable })
         }
         NRS_EVENT_AUDIO_SERVICE => {
             let a = unsafe { e.u.audio_service };
@@ -320,6 +366,22 @@ unsafe fn translate(evt: *const NrsEvent) -> Option<Event> {
     }
 }
 
+/// The sync's carrier offset, or zero where it cannot be one.
+///
+/// nrsc5 3.0 sent the sync event with no payload, so on that library these
+/// bytes are whatever the stack held. The search nrsc5 makes is a few
+/// kilohertz either side; anything past that, or not a number at all, is not
+/// an offset.
+fn sane_offset(hz: f32) -> f32 {
+    if hz.is_finite() && hz.abs() < 100_000.0 { hz } else { 0.0 }
+}
+
+/// The Primary Service Mode Indicator, or zero where it cannot be one: the
+/// field is six bits on the air, and on nrsc5 3.0 it is not there at all.
+fn sane_psmi(psmi: c_int) -> i32 {
+    if (0..64).contains(&psmi) { psmi } else { 0 }
+}
+
 /// Copies a NUL-terminated C string.
 unsafe fn cstr(p: *const c_char) -> Option<String> {
     if p.is_null() {
@@ -329,14 +391,9 @@ unsafe fn cstr(p: *const c_char) -> Option<String> {
     Some(c.to_string_lossy().into_owned())
 }
 
-/// Opaque receiver handle, from the C library's point of view.
+/// `nrsc5_event_t`, as far as this crate reads it.
 #[repr(C)]
-struct NrsCtx {
-    _private: [u8; 0],
-}
-
-#[repr(C)]
-struct NrsEvent {
+pub(crate) struct NrsEvent {
     event: c_uint,
     u: NrsUnion,
 }
@@ -349,7 +406,6 @@ union NrsUnion {
     sync: NrsSync,
     ber: NrsBer,
     mer: NrsMer,
-    #[allow(dead_code)]
     hdc: NrsHdc,
     audio: NrsAudio,
     audio_service: NrsAudioService,
@@ -382,23 +438,21 @@ struct NrsMer {
     upper: c_float,
 }
 
+/// Only the programme is read: nothing here decodes the packet itself.
 #[repr(C)]
 #[derive(Clone, Copy)]
-#[allow(dead_code)]
 struct NrsHdc {
     program: c_uint,
-    data: *const u8,
-    count: usize,
-    flags: c_uint,
 }
 
+/// Ends at `count`: master's `flags` after it is left uninitialised by any
+/// older library — see [`Event::Audio`].
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct NrsAudio {
     program: c_uint,
     data: *const i16,
     count: usize,
-    flags: c_uint,
 }
 
 #[repr(C)]
@@ -423,17 +477,60 @@ struct NrsName {
     name: *const c_char,
 }
 
-#[allow(clippy::type_complexity)]
-type NrsCallback = unsafe extern "C" fn(evt: *const NrsEvent, opaque: *mut c_void);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-unsafe extern "C" {
-    fn nrsc5_open_pipe(st: *mut *mut NrsCtx) -> c_int;
-    fn nrsc5_close(st: *mut NrsCtx);
-    fn nrsc5_start(st: *mut NrsCtx);
-    fn nrsc5_stop(st: *mut NrsCtx);
-    fn nrsc5_set_mode(st: *mut NrsCtx, mode: c_int) -> c_int;
-    fn nrsc5_set_callback(st: *mut NrsCtx, callback: Option<NrsCallback>, opaque: *mut c_void);
-    fn nrsc5_pipe_samples_cu8(st: *mut NrsCtx, samples: *const u8, length: c_uint) -> c_int;
-    fn nrsc5_pipe_samples_cs16(st: *mut NrsCtx, samples: *const i16, length: c_uint) -> c_int;
-    fn nrsc5_pipe_samples_cf32(st: *mut NrsCtx, samples: *const f32, length: c_uint) -> c_int;
+    /// The members read out of `nrsc5_event_t`, where the headers of v3.1.0,
+    /// v3.2.0 and master (0225922) put them on a 64-bit target: offsets into
+    /// the event, measured with `offsetof` against each header. A library
+    /// loaded at run time is checked by nothing else, so a change to the
+    /// structs above that moves one of these is caught here instead of as
+    /// audio read from the middle of a pointer.
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn layout() {
+        use std::mem::offset_of;
+        let u = offset_of!(NrsEvent, u);
+        assert_eq!(u, 8, "the union follows the event number");
+        assert_eq!(u + offset_of!(NrsSync, freq_offset), 8);
+        assert_eq!(u + offset_of!(NrsSync, psmi), 12);
+        assert_eq!(u + offset_of!(NrsMer, lower), 8);
+        assert_eq!(u + offset_of!(NrsMer, upper), 12);
+        assert_eq!(u + offset_of!(NrsBer, cber), 8);
+        assert_eq!(u + offset_of!(NrsHdc, program), 8);
+        assert_eq!(u + offset_of!(NrsAudio, program), 8);
+        assert_eq!(u + offset_of!(NrsAudio, data), 16);
+        assert_eq!(u + offset_of!(NrsAudio, count), 24);
+        assert_eq!(u + offset_of!(NrsAudioService, program), 8);
+        assert_eq!(u + offset_of!(NrsAudioService, access), 12);
+        assert_eq!(u + offset_of!(NrsAudioService, codec_mode), 20);
+        assert_eq!(u + offset_of!(NrsName, name), 8);
+    }
+
+    /// A `cf32` block handed to a library without `cf32` arrives at the level
+    /// that library's own 8-bit path produces, and a peak past full scale
+    /// saturates instead of wrapping to the opposite sign.
+    #[test]
+    fn cf32_reaches_an_old_library_at_its_own_scale() {
+        assert_eq!(cf32_to_legacy_cs16(0.0), 0);
+        // An 8-bit dongle's full swing, as `U8_F` and `U8_Q15` each see it.
+        assert_eq!(cf32_to_legacy_cs16((255.0 - 127.0) / 128.0), (255 - 127) * 64);
+        assert_eq!(cf32_to_legacy_cs16((0.0 - 127.0) / 128.0), (0 - 127) * 64);
+        assert_eq!(cf32_to_legacy_cs16(10.0), i16::MAX);
+        assert_eq!(cf32_to_legacy_cs16(-10.0), i16::MIN);
+    }
+
+    /// nrsc5 3.0 sends the sync with no payload, so what is read there is
+    /// whatever was on its stack: nothing that cannot be an offset or a service
+    /// mode is passed on as one.
+    #[test]
+    fn a_sync_without_a_payload_reads_as_nothing() {
+        assert_eq!(sane_offset(-1234.5), -1234.5);
+        assert_eq!(sane_offset(f32::NAN), 0.0);
+        assert_eq!(sane_offset(3.0e30), 0.0);
+        assert_eq!(sane_psmi(2), 2);
+        assert_eq!(sane_psmi(-7), 0);
+        assert_eq!(sane_psmi(0x7fff_0000), 0);
+    }
 }

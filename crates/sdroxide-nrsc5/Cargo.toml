@@ -2,19 +2,18 @@
 name = "sdroxide-nrsc5"
 version.workspace = true
 edition.workspace = true
-# The vendored C this wraps — `vendor/nrsc5` (GPL-3.0-or-later) — decodes
-# HD Radio (NRSC-5). Its audio codec needs faad2's HDC variant, which
-# `crates/sdroxide-faad2` builds from upstream faad2 with nrsc5's own
-# `support/faad2-hdc-support.patch` applied — the one faad2 the binary has,
-# shared with the DRM receiver, since two copies would collide on every
-# `NeAACDec*` symbol.
+# HD Radio (NRSC-5) through the `libnrsc5` installed on the machine, found with
+# dlopen at run time (issue #488): nothing of nrsc5 is compiled in, and so
+# neither is the patched faad2 its HDC audio needs, which the library carries
+# privately. A machine without it builds and runs the same, and offers the mode
+# greyed out with the reason. nrsc5 itself is GPL-3.0-or-later.
 license.workspace = true
 
-# Native-only: links vendored C. Must never be a dependency of any
+# Native-only: dlopens a C library. Must never be a dependency of any
 # wasm-targeted crate.
 
 [dependencies]
-sdroxide-faad2.workspace = true
+libloading.workspace = true
 sdroxide-types.workspace = true
 sdroxide-dsp.workspace = true
 num-complex.workspace = true
@@ -25,6 +24,3 @@ tracing.workspace = true
 # For the capture example only: it drives the decoder, and the warnings that
 # path emits are part of what it reports.
 tracing-subscriber.workspace = true
-
-[build-dependencies]
-cc = "1"

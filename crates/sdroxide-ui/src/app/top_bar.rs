@@ -6263,7 +6263,16 @@ fn band_mode_menu(
             Mode::Isb,
             Mode::Spec,
         ] {
-            if crate::chrome::chip(ui, mode == m, m.label()).clicked() {
+            // Offered even where it cannot run, greyed out with the reason, so
+            // the operator learns the mode exists and what it would take —
+            // HD Radio without an nrsc5 on the station's machine (issue #488).
+            let why = state.mode_unavailable(m);
+            let resp = crate::chrome::chip_enabled(ui, why.is_none(), mode == m, m.label());
+            let resp = match why {
+                Some(why) => resp.on_disabled_hover_text(why),
+                None => resp,
+            };
+            if resp.clicked() {
                 cmds.push(Command::SetMode { rx: RxId::Main, mode: m });
             }
         }
@@ -7807,6 +7816,63 @@ mod tests {
         let (shown, ink, _) = readout_for(&state, true, true, 700.0);
         assert_eq!(shown, 145_112_500.0, "the transmit frequency, not the dial plus a pitch");
         assert_eq!(ink, Some(crate::theme::ALERT()));
+    }
+
+    /// Draw the band/mode menu for `state` and click the chip labelled
+    /// `label`, returning what the menu asked for. Two passes, as `press` does
+    /// in the public-SDR browser: the first finds where the label was painted,
+    /// the second aims at it.
+    fn click_in_band_mode_menu(state: &RadioState, label: &str) -> Vec<Command> {
+        let (ctx, input) = desktop_ctx();
+        let draw = |input: egui::RawInput, cmds: &mut Vec<Command>| {
+            ctx.run_ui(input, |ui| {
+                band_mode_menu(ui, state.rx[0].mode, state, None, false, None, true, cmds);
+            })
+        };
+        let first = draw(input.clone(), &mut Vec::new());
+        let at = first
+            .shapes
+            .iter()
+            .find_map(|c| match &c.shape {
+                egui::Shape::Text(t) if t.galley.text() == label => {
+                    Some(t.pos + t.galley.rect.center().to_vec2())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{label} is not in the menu"));
+        first.drop_without_applying_deltas();
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let mut cmds = Vec::new();
+        for events in [vec![egui::Event::PointerMoved(at), button(true)], vec![button(false)]] {
+            draw(egui::RawInput { events, ..input.clone() }, &mut cmds)
+                .drop_without_applying_deltas();
+        }
+        cmds
+    }
+
+    /// HD Radio stays on the mode row on a station without an nrsc5, but
+    /// greyed out: a click on it asks for nothing (issue #488). With the
+    /// library there, the same click picks the mode — so the test is of the
+    /// greying, not of a chip that could never be clicked.
+    #[test]
+    fn a_mode_the_station_cannot_run_is_offered_but_cannot_be_picked() {
+        let mut state = RadioState::default();
+        let picked = click_in_band_mode_menu(&state, "HD RADIO");
+        assert!(
+            picked.contains(&Command::SetMode { rx: RxId::Main, mode: Mode::HdRadio }),
+            "{picked:?}"
+        );
+
+        state.hd_radio_unavailable = Some("no libnrsc5 here".into());
+        assert_eq!(state.mode_unavailable(Mode::HdRadio), Some("no libnrsc5 here"));
+        assert_eq!(state.mode_unavailable(Mode::Wfm), None);
+        let picked = click_in_band_mode_menu(&state, "HD RADIO");
+        assert!(picked.is_empty(), "a greyed-out chip asked for {picked:?}");
     }
 
     /// Open the band/mode menu on a `screen`-sized viewport and measure the
