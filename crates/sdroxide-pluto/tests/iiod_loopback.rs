@@ -170,11 +170,23 @@ struct DeviceState {
     rx_open_masks: Vec<String>,
     /// … and on the transmit buffer.
     tx_open_masks: Vec<String>,
-    /// Pause this long in the middle of the next `READBUF` payload, once.
-    /// Models the intermittent gap a Pluto on a USB gadget produces every few
-    /// minutes. How long it lasts decides which of the client's two answers is
-    /// under test — see [`HICCUP`] and [`STALL`].
-    stall_next_readbuf: Option<Duration>,
+    /// Go quiet in the middle of the next `READBUF` payload, once — one socket
+    /// or the whole board, for how long. Which of the two, and how long it
+    /// lasts, decides which of the client's answers is under test: see
+    /// [`Stall`], [`HICCUP`], [`PAUSE`] and [`STALL`].
+    stall_next_readbuf: Option<Stall>,
+    /// Until when the whole board is quiet: every connection's next command,
+    /// a fresh one's included, waits for this to pass. Set by a
+    /// [`Stall::Board`].
+    paused_until: Option<Instant>,
+    /// Connections that asked `VERSION` without ever sending `TIMEOUT` — the
+    /// client's probe of whether the board is still answering, which is not
+    /// one of its sessions and is not counted in [`Fake::connections`].
+    probes: usize,
+    /// Never answer the next `READBUF` at all, while answering everything else:
+    /// a socket stuck before its reply began, the shape the #377 control-drop
+    /// started with ("read reply failed").
+    swallow_next_readbuf: bool,
     /// Answer every `READBUF` with `-EAGAIN` until the buffer is reopened.
     /// Models a wedged DMA: the connection is fine, the server is answering,
     /// and no amount of further reading will ever produce a sample.
@@ -218,10 +230,28 @@ impl DeviceState {
     }
 }
 
+/// The two ways a `READBUF` goes quiet mid-payload, which look the same from
+/// inside the socket and want opposite treatment.
+#[derive(Clone, Copy)]
+enum Stall {
+    /// This one socket stops while the board carries on answering everything
+    /// else — issues #377 and #418: a fresh connection got `VERSION` back in
+    /// milliseconds while the stuck one had been silent for seconds, and every
+    /// redial worked at once.
+    Socket(Duration),
+    /// The whole board stops, fresh connections included, as a Pluto does
+    /// when its own processor is too busy to feed the network — issue #288.
+    /// The bytes come when it recovers.
+    Board(Duration),
+}
+
 struct Fake {
     addr: std::net::SocketAddr,
     state: Arc<Mutex<DeviceState>>,
     stop: Arc<AtomicBool>,
+    /// The client's sessions: connections that sent `TIMEOUT`, which every
+    /// one of its connections does first. Its probes of whether the board is
+    /// answering do not, and are in [`DeviceState::probes`] instead.
     connections: Arc<AtomicUsize>,
 }
 
@@ -230,20 +260,26 @@ impl Fake {
         Fake::start_with(DeviceState::default(), CONTEXT_XML.to_string())
     }
 
-    /// A device that goes quiet in the middle of one buffer for longer than the
-    /// client will wait, and then carries on.
+    /// One socket that goes quiet in the middle of a buffer for longer than
+    /// anyone should wait, while the board goes on answering everything else.
     fn start_that_stalls_mid_buffer() -> Fake {
         Fake::start_with(
-            DeviceState { stall_next_readbuf: Some(STALL), ..DeviceState::default() },
+            DeviceState {
+                stall_next_readbuf: Some(Stall::Socket(STALL)),
+                ..DeviceState::default()
+            },
             CONTEXT_XML.to_string(),
         )
     }
 
-    /// The same fault, briefly enough that the client should ride it out on the
-    /// socket it already has — see [`HICCUP`].
+    /// The whole board going quiet mid-buffer, briefly enough that the client
+    /// should ride it out on the socket it already has — see [`HICCUP`].
     fn start_that_hiccups_mid_buffer() -> Fake {
         Fake::start_with(
-            DeviceState { stall_next_readbuf: Some(HICCUP), ..DeviceState::default() },
+            DeviceState {
+                stall_next_readbuf: Some(Stall::Board(HICCUP)),
+                ..DeviceState::default()
+            },
             CONTEXT_XML.to_string(),
         )
     }
@@ -252,7 +288,7 @@ impl Fake {
     /// deadline, and with the transfer still on its way — see [`PAUSE`].
     fn start_that_pauses_mid_buffer() -> Fake {
         Fake::start_with(
-            DeviceState { stall_next_readbuf: Some(PAUSE), ..DeviceState::default() },
+            DeviceState { stall_next_readbuf: Some(Stall::Board(PAUSE)), ..DeviceState::default() },
             CONTEXT_XML.to_string(),
         )
     }
@@ -288,11 +324,11 @@ impl Fake {
                         break;
                     }
                     let Ok(sock) = sock else { break };
-                    connections.fetch_add(1, Ordering::Relaxed);
                     let state = Arc::clone(&state);
                     let stop = Arc::clone(&stop);
                     let xml = Arc::clone(&xml);
-                    std::thread::spawn(move || serve(sock, state, stop, xml));
+                    let connections = Arc::clone(&connections);
+                    std::thread::spawn(move || serve(sock, state, stop, xml, connections));
                 }
             });
         }
@@ -417,11 +453,18 @@ const SAMPLE2_Q: i16 = -1024;
 /// +1024 = `0x400`; -1024 in 12-bit two's complement = `0xC00`.
 const SAMPLE2_BYTES: [u8; 4] = [0x00, 0x04, 0x00, 0x0C];
 
-fn serve(sock: TcpStream, state: Arc<Mutex<DeviceState>>, stop: Arc<AtomicBool>, xml: Arc<String>) {
+fn serve(
+    sock: TcpStream,
+    state: Arc<Mutex<DeviceState>>,
+    stop: Arc<AtomicBool>,
+    xml: Arc<String>,
+    connections: Arc<AtomicUsize>,
+) {
     let _ = sock.set_read_timeout(Some(Duration::from_millis(100)));
     let mut writer = sock.try_clone().expect("clone");
     let mut reader = BufReader::new(sock);
     let mut line = String::new();
+    let mut session = false;
     while !stop.load(Ordering::Relaxed) {
         line.clear();
         match reader.read_line(&mut line) {
@@ -436,9 +479,26 @@ fn serve(sock: TcpStream, state: Arc<Mutex<DeviceState>>, stop: Arc<AtomicBool>,
             continue;
         }
         let words: Vec<&str> = cmd.split_whitespace().collect();
+        // Counted on arrival rather than on answer, so a probe the board is
+        // too busy to answer is on the books by the time its pause is over.
+        if !session && words.first() == Some(&"VERSION") {
+            state.lock().expect("lock").probes += 1;
+        }
+        // A board that has paused answers nobody until it recovers — a fresh
+        // connection included, which is what tells its pause apart from one
+        // stuck socket.
+        let paused_until = state.lock().expect("lock").paused_until;
+        if let Some(until) = paused_until {
+            std::thread::sleep(until.saturating_duration_since(Instant::now()));
+        }
         let ok = match words.first().copied() {
             Some("VERSION") => writer.write_all(b"0.25 (git tag:v0.25)\n").is_ok(),
-            Some("TIMEOUT") => writer.write_all(b"0\n").is_ok(),
+            Some("TIMEOUT") => {
+                if !std::mem::replace(&mut session, true) {
+                    connections.fetch_add(1, Ordering::Relaxed);
+                }
+                writer.write_all(b"0\n").is_ok()
+            }
             Some("PRINT") => writer.write_all(format!("{}\n{xml}\n", xml.len()).as_bytes()).is_ok(),
             Some("READ") => {
                 let key = attr_key(&words[1..]);
@@ -597,6 +657,9 @@ fn serve(sock: TcpStream, state: Arc<Mutex<DeviceState>>, stop: Arc<AtomicBool>,
                 writer.write_all(b"0\n").is_ok()
             }
             Some("READBUF") => {
+                if std::mem::take(&mut state.lock().expect("lock").swallow_next_readbuf) {
+                    continue;
+                }
                 // A dual-pair mask gets four-element sample sets, the second
                 // pair carrying its own pattern; anything else gets the stock
                 // two-element sets.
@@ -639,12 +702,19 @@ fn serve(sock: TcpStream, state: Arc<Mutex<DeviceState>>, stop: Arc<AtomicBool>,
                     let mut g = state.lock().expect("lock");
                     std::mem::take(&mut g.stall_next_readbuf)
                 };
-                let ok = if let Some(how_long) = stall {
+                let ok = if let Some(stall) = stall {
                     // The same bytes in the same order — only the timing
                     // differs. The pause falls *inside* the first chunk's
                     // payload, which is the position that matters: a read that
                     // gives up there has consumed an unknown number of bytes
                     // and cannot simply be retried from the top.
+                    let how_long = match stall {
+                        Stall::Socket(d) => d,
+                        Stall::Board(d) => {
+                            state.lock().expect("lock").paused_until = Some(Instant::now() + d);
+                            d
+                        }
+                    };
                     stalled_chunk(&mut writer, &data[..split], &mask, how_long)
                         && write_chunk(&mut writer, &data[split..], &mask)
                 } else {
@@ -739,12 +809,13 @@ fn attr_key(words: &[&str]) -> String {
     parts.join("/")
 }
 
-/// A mid-buffer gap short enough that the client should wait it out on the
-/// socket it already has.
+/// A mid-buffer pause of the whole board short enough that the client should
+/// wait it out on the socket it already has.
 ///
-/// Over the one-second socket poll, so the read genuinely comes back empty and
-/// the retry loop is what carries it; under the payload deadline, so the answer
-/// under test is patience rather than the reconnect below.
+/// Several socket polls long, so the read genuinely comes back empty and the
+/// retry loop is what carries it, and long enough that the client asks the
+/// board — twice — and gets no answer; under the payload deadline, so the
+/// answer under test is patience rather than the reconnect below.
 const HICCUP: Duration = Duration::from_millis(1_200);
 
 /// A mid-buffer gap longer than one payload deadline, on a transfer that then
@@ -754,13 +825,14 @@ const HICCUP: Duration = Duration::from_millis(1_200);
 /// that the bytes were always going to arrive.
 const PAUSE: Duration = Duration::from_millis(3_000);
 
-/// A mid-buffer gap long enough that the client should stop waiting and replace
-/// the receive socket.
+/// A mid-buffer silence on one socket, long enough that the client has no
+/// business waiting it out — and, the board answering meanwhile, no reason to.
 ///
-/// Six seconds is chosen against the field report: a LibreSDR over a saturated
-/// link went quiet mid-payload while `iiod` on the same board answered a fresh
-/// connection in six milliseconds. Waiting it out was eight seconds of dead
-/// audio for a fault a reconnect clears in fifty milliseconds.
+/// Six seconds is chosen against the field reports: a LibreSDR went quiet
+/// mid-payload for eight seconds while `iiod` on the same board answered a
+/// fresh connection in six milliseconds, and the #377 stalls ran out a
+/// six-second deadline time after time. A reconnect clears it in tens of
+/// milliseconds.
 const STALL: Duration = Duration::from_secs(6);
 
 fn wait_for(what: &str, cond: impl FnMut() -> bool) {
@@ -971,6 +1043,9 @@ fn a_gap_in_the_middle_of_a_buffer_does_not_end_the_stream() {
         3,
         "a gap shorter than the payload deadline must be waited out, not redialled around"
     );
+    // And waited out because the board was asked and said nothing — it was the
+    // board that had gone quiet, not this socket.
+    assert!(fake.state.lock().expect("lock").probes >= 1, "the board was never asked");
     // The samples either side of the gap are still the ones the device sent,
     // in the right order — a retry that lost its place would interleave I and Q.
     assert!((buf[0] - (SAMPLE_I as f32 / 2048.0)).abs() < 1e-6, "I was {}", buf[0]);
@@ -1008,6 +1083,10 @@ fn a_pause_the_transfer_recovers_from_costs_no_socket() {
         "a pause the transfer recovered from must not have cost a socket"
     );
     assert_eq!(fake.state.lock().expect("lock").rx_buffer_opens, 1, "...nor a buffer reopen");
+    assert!(
+        fake.state.lock().expect("lock").probes >= 1,
+        "the board should have been asked, and its silence is why the socket was kept"
+    );
     // And the two halves are still the samples the device sent, in order — a
     // resumed read that lost its place would interleave I and Q.
     assert!((buf[0] - (SAMPLE_I as f32 / 2048.0)).abs() < 1e-6, "I was {}", buf[0]);
@@ -1015,21 +1094,23 @@ fn a_pause_the_transfer_recovers_from_costs_no_socket() {
     handle.release();
 }
 
-/// A gap too long to wait out costs one socket, not the whole radio.
+/// A socket stuck while the board answers costs one socket, not the whole
+/// radio — and not seconds of waiting either (issues #377, #418).
 ///
-/// The fault this is drawn from wedged a single TCP connection mid-payload for
-/// eight seconds while `iiod` on the same board answered a fresh connection in
-/// six milliseconds — so the board was never gone, and taking the rig down to
-/// redial it from scratch (context XML, whole front end, source swap) added a
-/// second of dead audio to a stall that was already the complaint. Replacing
-/// the one socket that failed is tens of milliseconds, and it leaves the dial,
-/// the gains and any transmission in progress alone.
+/// The faults this is drawn from wedged a single TCP connection mid-payload for
+/// six to eight seconds at a time while `iiod` on the same board answered a
+/// fresh connection in six milliseconds. Taking the rig down to redial it from
+/// scratch (context XML, whole front end, source swap) added a second of dead
+/// audio to a stall that was already the complaint; waiting the deadline out
+/// first, as the client later did, was the rest of it, every time. The board
+/// is asked once the socket has been quiet for half a second, and the socket
+/// replaced as soon as it answers.
 #[test]
-fn a_gap_too_long_to_wait_out_replaces_the_socket_and_keeps_the_radio() {
+fn a_socket_stuck_while_the_board_answers_is_replaced_at_once_and_keeps_the_radio() {
     let fake = Fake::start_that_stalls_mid_buffer();
     let mut handle =
         PlutoHandle::open(&fake.address(), &config(), 435_000_000.0).expect("open the fake Pluto");
-    wait_for("the receive buffer", || fake.state.lock().unwrap().rx_buffer_open);
+    let opened = Instant::now();
 
     let mut buf = vec![0f32; 4096];
     let mut got = 0;
@@ -1037,7 +1118,15 @@ fn a_gap_too_long_to_wait_out_replaces_the_socket_and_keeps_the_radio() {
         got = handle.rx_read(&mut buf);
         got > 0
     });
+    let took = opened.elapsed();
+    assert!(
+        took < Duration::from_millis(1_500),
+        "the stuck socket cost {took:?} of silence — waiting out the payload deadline on a \
+         socket the board has stopped sending on is the dead air this exists to remove"
+    );
     assert!(handle.is_alive(), "the board was never gone, and the connection must survive");
+    let trace = handle.trace().dump();
+    assert!(trace.contains("the socket is stuck"), "the verdict belongs in the trace:\n{trace}");
     let connections = fake.connections.load(Ordering::Relaxed);
     assert!(
         connections >= 4,
@@ -1055,6 +1144,37 @@ fn a_gap_too_long_to_wait_out_replaces_the_socket_and_keeps_the_radio() {
         fake.state.lock().unwrap().get("ad9361-phy/OUTPUT/altvoltage0/frequency")
             == Some("144200000")
     });
+    handle.release();
+}
+
+/// The same stuck socket, caught before its reply began: a `READBUF` that is
+/// never answered while the board answers everything else. How the #377
+/// control-connection drop started ("read reply failed").
+///
+/// Later than a stuck payload, because a healthy daemon may sit on a request
+/// for its whole device timeout before saying `-ETIMEDOUT` — but not the
+/// eight seconds the reply wait used to take to give up.
+#[test]
+fn a_readbuf_never_answered_while_the_board_answers_is_replaced() {
+    let fake = Fake::start_with(
+        DeviceState { swallow_next_readbuf: true, ..DeviceState::default() },
+        CONTEXT_XML.to_string(),
+    );
+    let mut handle =
+        PlutoHandle::open(&fake.address(), &config(), 435_000_000.0).expect("open the fake Pluto");
+    let opened = Instant::now();
+
+    let mut buf = vec![0f32; 4096];
+    let mut got = 0;
+    wait_up_to(Duration::from_secs(12), "samples after the socket was replaced", || {
+        got = handle.rx_read(&mut buf);
+        got > 0
+    });
+    let took = opened.elapsed();
+    assert!(took < Duration::from_secs(6), "an unanswered READBUF cost {took:?} of silence");
+    assert!(handle.is_alive(), "the board was never gone, and the connection must survive");
+    assert_eq!(fake.connections.load(Ordering::Relaxed), 4, "one socket replaced, no more");
+    assert!(fake.state.lock().expect("lock").probes >= 1, "the board was never asked");
     handle.release();
 }
 
@@ -1130,8 +1250,10 @@ fn releasing_mid_read_is_not_reported_as_a_failed_socket() {
     let fake = Fake::start_that_stalls_mid_buffer();
     let mut handle =
         PlutoHandle::open(&fake.address(), &config(), 435_000_000.0).expect("open the fake Pluto");
-    // Inside the stalled read, which is where the probe's release lands.
-    std::thread::sleep(Duration::from_millis(300));
+    // Inside the stalled read, which is where the probe's release lands — and
+    // well before the half-second of silence after which the board would be
+    // asked about the socket, which here would rightly condemn it.
+    std::thread::sleep(Duration::from_millis(150));
     handle.release();
 
     let trace = handle.trace().dump();

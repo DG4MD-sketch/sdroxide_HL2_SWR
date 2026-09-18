@@ -8476,10 +8476,10 @@ configured in exactly the same way as one on your desk.
   default of 32768 is about 16 ms at 2 Msps: long enough that the per-transfer
   round trip is not the bottleneck, short enough that a retune is not visibly
   late. **Halve it if the log reports the receive socket being replaced** (see
-  *When the link stalls*, below) — a smaller transfer is both less likely to be
-  caught by a hiccup part-way through and quicker to make good afterwards.
-  Raise it to trade retune latency for fewer round trips. Takes effect on
-  Apply.
+  *When the receive stream stalls*, below) — a smaller transfer is both less
+  likely to be caught by a hiccup part-way through and quicker to make good
+  afterwards. Raise it to trade retune latency for fewer round trips. Takes
+  effect on Apply.
 - **RX / TX port** — the AD9361's `rf_port_select`. A stock Pluto wires one of
   each (`A_BALANCED` and `A`), so leave these empty unless you have a board that
   does not. The **ANT** control only offers the ports the board will actually
@@ -8700,25 +8700,33 @@ is plenty for voice and leaves the most headroom. Reaching the radio over real
 Ethernet rather than the USB gadget helps too, and so does taking it off a USB
 hub.
 
-**When the link stalls.** A Pluto reached over a link with no headroom left —
-the USB Ethernet gadget at a high sample rate is the usual one — sometimes goes
-quiet part-way through a transfer while the board itself stays perfectly
-healthy. sdroxide waits a couple of seconds for the data to resume, which
-covers ordinary network jitter; past that it replaces the receive connection
-and reopens the buffer, and logs
+**When the receive stream stalls.** Now and then the receive connection to a
+Pluto goes quiet part-way through a transfer while the board itself is fine — a
+fresh connection is answered in milliseconds. It has been reported over the USB
+gadget and over a dedicated gigabit link alike, on stock and Tezuka firmware;
+the bytes stop reaching this computer, and why is not yet understood. Once the
+receive connection has been silent for half a second, sdroxide asks the board,
+on a connection of its own, whether it is still answering. If it is, the stuck
+connection is replaced and the buffer reopened straight away — well under a
+second of audio — and the log says
 
 ```
-PlutoSDR: the receive socket failed (…) — replacing it
+PlutoSDR: the receive socket failed (… nothing on this socket for 0.5s while the board answered a fresh connection in 3 ms — the socket is stuck, not the radio) — replacing it
 ```
 
-That costs a few tens of milliseconds of audio and leaves your dial, your gains
-and any transmission in progress alone — the control connection is a separate
-socket and is not touched. If it happens **once in a while**, ignore it. If it
-happens **repeatedly**, the link is the thing to fix: lower the sample rate,
-halve **Buffer size**, move the radio off a USB hub, or reach it over real
-Ethernet instead of the USB gadget. Should the receive connection fail to come
-back at all, the radio is reported as disconnected and reconnected from scratch
-in the usual way.
+If the board does not answer either, it has paused — usually its own processor
+too busy to feed the network — and sdroxide waits for it, a few seconds at
+most, rather than redialling around it. Neither touches your dial, your gains or
+a transmission in progress: the control connection is a separate socket.
+
+If it happens **once in a while**, ignore it. If the log keeps saying that **the
+board stops answering**, lighten its load: a lower sample rate, and on a Tezuka
+build the services described above. Halving **Buffer size** helps either way,
+because a smaller transfer is less likely to be caught part-way. Should the
+receive connection fail to come back at all, the radio is reported as
+disconnected and reconnected from scratch in the usual way. **Copy diagnostic
+report** records every stall and which of the two it was — that is the evidence
+that will find the cause, so it is worth attaching to a report.
 
 **Transmit, the first time.** Set TX gain to its minimum, key into a **dummy
 load**, and check the signal is where the dial says before you raise it. The
