@@ -849,7 +849,9 @@ have just made.
 Change any of them and the change is remembered **for the mode you were in**,
 not globally: turn the noise reduction up on 20 m SSB and FT8 still comes up
 with it off. Put a setting back to the mode's default and it stops being an
-override on its own. When anything in the current mode has been changed, a
+override on its own. On the first start after upgrading to a version with
+per-mode settings, what you had set becomes the values for the mode you were
+in, and every other mode starts from its own defaults. When anything in the current mode has been changed, a
 **DEFAULTS** chip appears in the filter/noise row: hovering it names what
 differs, and clicking it puts the mode's own values back and forgets what you
 had set. A station's per-mode values live in `modeprofiles.json` beside its

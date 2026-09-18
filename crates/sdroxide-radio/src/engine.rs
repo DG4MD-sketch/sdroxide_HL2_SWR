@@ -3674,8 +3674,8 @@ fn engine_thread(
     // Whether that session came off the disk or is the default. `load_session`
     // answers a default either way — which is what keeps an engine remembering
     // from its first change — so the file's presence has to be asked
-    // separately. Only a *restored* session suppresses the mode defaults at
-    // startup; see the profile block below.
+    // separately. Only a *restored* session's levels are recorded as its mode's
+    // own values at startup; see the profile block below.
     let session_restored =
         engine_cfg.remember_session && engine_cfg.store.load_session_if_present().is_some();
     // Held separately from what this front end can carry: a start on a stand-in
@@ -3725,7 +3725,7 @@ fn engine_thread(
     // Like the session, the per-mode overrides are only read and written by an
     // engine that was asked to remember its settings. A test or a one-shot
     // engine must not pick up the operator's file — or leave one behind.
-    let mode_profiles = if engine_cfg.remember_session {
+    let mut mode_profiles = if engine_cfg.remember_session {
         engine_cfg.store.load_mode_profiles()
     } else {
         sdroxide_types::ModeProfiles::default()
@@ -3802,26 +3802,45 @@ fn engine_thread(
         state.repeater = s.repeater.clamped();
         state.recording_mono = s.recording_mono;
     }
-    // A mode's profile is applied when the mode is *chosen*, not when the
-    // program starts into a mode the operator already left it in.
+    // Every receiver starts on its mode's settings: the mode's defaults with
+    // this station's overrides laid over them.
     //
-    // Applying it here as well would undo the session that was just restored:
-    // `effective` fills every field the profile speaks to from the mode's
-    // defaults, so a station upgrading to a build with per-mode settings —
-    // whose `modeprofiles.json` is still empty — would come up with the saved
-    // AGC, squelch, noise reduction, binaural and RX gain reset to the mode
-    // defaults, silently. The restored session is the operator's own last
-    // word on the mode it was left in, so it stands; the profile applies from
-    // here on, the first time the mode changes (see `set_rx_mode`).
+    // A restored session's levels are what the operator left its mode on, so
+    // they are first recorded as that mode's own values, and the profile then
+    // lays them back on the receiver. Standing on the receiver alone they
+    // would last only until the mode was next left — a station upgrading to a
+    // build with per-mode settings starts with an empty `modeprofiles.json`,
+    // and its saved AGC, squelch, noise reduction, binaural and RX gain would
+    // be gone the first time it changed mode and came back. Laid over the
+    // profile rather than instead of it, because the session does not carry
+    // everything: auto-notch, AGC max gain, WFM stereo and the whole sub
+    // receiver come from the profile alone, and an override for one of them
+    // has to be back after a restart too.
     //
-    // With no session — a first run, or an engine told not to remember — there
-    // is nothing to undo and the mode's defaults are exactly what should be
-    // there.
-    if !session_restored {
-        for rx in &mut state.rx {
-            let profile = mode_profiles.effective(rx.mode);
-            profile.apply_to(rx);
-        }
+    // Recorded against the mode the session was left in, which is not always
+    // the one the receiver starts in: `--mode` can pick another, and that is a
+    // mode change like any other.
+    //
+    // A first run, or an engine told not to remember, has no session to
+    // record: the profile alone, which is the mode's defaults.
+    let mut mode_profiles_dirty = false;
+    if let Some(s) = session.as_ref().filter(|_| session_restored) {
+        let left_on = sdroxide_types::ModeProfile {
+            agc: Some(s.agc),
+            manual_gain_db: Some(s.rx_gain_db),
+            squelch_db: Some(s.squelch_db),
+            noise_reduction: Some(s.noise_reduction),
+            binaural: Some(s.binaural),
+            ..Default::default()
+        };
+        let before = mode_profiles.overrides(s.mode);
+        let mut over = left_on.over(before.unwrap_or_default());
+        over.trim_against(&s.mode.default_profile());
+        mode_profiles.set(s.mode, over);
+        mode_profiles_dirty = mode_profiles.overrides(s.mode) != before;
+    }
+    for rx in &mut state.rx {
+        mode_profiles.effective(rx.mode).apply_to(rx);
     }
     // The command line outranks the remembered session, exactly as it does for
     // the dial and the mode.
@@ -4082,7 +4101,7 @@ fn engine_thread(
         store: engine_cfg.store,
         profiles,
         mode_profiles,
-        mode_profiles_dirty: false,
+        mode_profiles_dirty,
         instance: engine_cfg.instance,
         primary: engine_cfg.primary,
         tx_gate: engine_cfg.tx_gate,

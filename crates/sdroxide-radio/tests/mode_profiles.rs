@@ -226,7 +226,8 @@ fn resetting_every_mode_puts_all_of_them_back() {
 /// on the receiver *after* restoring the session (as the first version did),
 /// every saved AGC, squelch, NR, binaural and RX gain is silently reset on the
 /// first launch. The session is the operator's last word on the mode it was
-/// left in; the profile applies when the mode is next *chosen*.
+/// left in, and is recorded as that mode's own values before the profile is
+/// laid on.
 #[test]
 fn a_restored_session_is_not_reset_by_the_modes_defaults() {
     let _guard = CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -254,24 +255,70 @@ fn a_restored_session_is_not_reset_by_the_modes_defaults() {
     stop(h);
 }
 
+/// The upgrade case one step on: the restored session's levels are recorded as
+/// its mode's own, so they survive leaving the mode and coming back.
+///
+/// Standing on the receiver alone they would not. The mode being returned to
+/// is laid out from `modeprofiles.json`, and on the first start after an
+/// upgrade that is empty — so without the session being recorded, the
+/// operator's settings would last exactly until the first mode change.
+#[test]
+fn a_restored_sessions_levels_become_its_modes_own() {
+    let _guard = CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    isolate("modeprofiles-upgrade");
+    {
+        let h = start(Mode::Usb);
+        send(&h, Command::SetNoiseReduction { rx: RxId::Main, level: NrLevel::High });
+        let _ = wait_for(&h, "USB's changed NR", |s| {
+            s.rx[0].mode == Mode::Usb && s.rx[0].noise_reduction == NrLevel::High
+        });
+        stop(h);
+    }
+    let dir = std::env::var("SDROXIDE_CONFIG_DIR").unwrap();
+    let _ = std::fs::remove_file(std::path::Path::new(&dir).join("modeprofiles.json"));
+
+    let h = start(Mode::Usb);
+    let _ = wait_for(&h, "USB's restored session", |s| {
+        s.rx[0].mode == Mode::Usb && s.rx[0].noise_reduction == NrLevel::High
+    });
+    send(&h, Command::SetMode { rx: RxId::Main, mode: Mode::Lsb });
+    let s = wait_for(&h, "LSB", |s| s.rx[0].mode == Mode::Lsb);
+    assert_eq!(s.rx[0].noise_reduction, NrLevel::Off, "LSB has its own settings");
+    send(&h, Command::SetMode { rx: RxId::Main, mode: Mode::Usb });
+    let s = wait_for(&h, "USB with its NR back", |s| {
+        s.rx[0].mode == Mode::Usb && s.rx[0].noise_reduction == NrLevel::High
+    });
+    assert_eq!(s.rx[0].noise_reduction, NrLevel::High);
+    stop(h);
+}
+
 /// Remembered means it survives a launch: a fresh engine in the same mode reads
 /// the file and applies the override with no command having been sent.
+///
+/// Auto-notch and AGC max gain because `session.json` carries neither, so
+/// nothing but `modeprofiles.json` can bring them back — a setting the session
+/// also restores would pass this whether the profile was applied or not.
 #[test]
 fn the_overrides_survive_a_restart() {
     let _guard = CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     isolate("modeprofiles-restart");
     {
         let h = start(Mode::Wspr);
-        send(&h, Command::SetSquelch { rx: RxId::Main, db: -80.0 });
-        let _ = wait_for(&h, "WSPR's squelch", |s| (s.rx[0].squelch_db + 80.0).abs() < 0.01);
-        // The write happens in the command handler, so by the state that proves
-        // the change it is already on disk.
+        send(&h, Command::SetAutoNotch { rx: RxId::Main, on: true });
+        send(&h, Command::SetAgcMaxGain { rx: RxId::Main, db: 60.0 });
+        let _ = wait_for(&h, "WSPR's notch and max gain", |s| {
+            s.rx[0].auto_notch && (s.rx[0].agc_max_gain_db - 60.0).abs() < 0.01
+        });
+        // Written when the engine stops, if the session tick has not got to it
+        // first.
         stop(h);
     }
 
     let h = start(Mode::Wspr);
-    let s = wait_for(&h, "WSPR's remembered squelch", |s| {
-        s.rx[0].mode == Mode::Wspr && (s.rx[0].squelch_db + 80.0).abs() < 0.01
+    let s = wait_for(&h, "WSPR's remembered notch and max gain", |s| {
+        s.rx[0].mode == Mode::Wspr
+            && s.rx[0].auto_notch
+            && (s.rx[0].agc_max_gain_db - 60.0).abs() < 0.01
     });
     assert_eq!(s.rx[0].agc, AgcMode::Slow, "the mode's own defaults are still under it");
     stop(h);
