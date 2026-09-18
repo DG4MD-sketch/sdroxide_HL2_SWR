@@ -837,6 +837,28 @@ jobs:
           Steila IK1XPV and the rx888-firmware contributors) and its notice
           ships as `LICENSE-rx888-firmware.txt` in every package.
 
+          ### HD Radio — all builds
+
+          HD Radio (the digital sidecar of North American FM stations) is
+          decoded by **libnrsc5** from the [nrsc5](https://github.com/theori-io/nrsc5)
+          project, which is **not bundled**: sdroxide looks for it at startup
+          and uses it if it is there. Without it the **HD RADIO** mode is shown
+          greyed out, and hovering it says why. With a remote client, it is the
+          station's machine that needs it, not the client's.
+
+          - **Linux**: on Arch, the `nrsc5-git` AUR package. Elsewhere, build
+            nrsc5 from source: `sudo make install` puts `libnrsc5.so` in
+            `/usr/local/lib`, where sdroxide looks. A `libnrsc5.so` beside the
+            executable works too.
+          - **Windows**: put `libnrsc5.dll` and the DLLs it depends on beside
+            `sdroxide.exe`. nrsc5 publishes no Windows download; it builds with
+            MSYS2.
+          - **macOS**: build and install nrsc5 from source, which puts
+            `libnrsc5.dylib` in `/usr/local/lib`.
+
+          Restart sdroxide after installing it: the library is looked for once,
+          at startup.
+
           ### Spoken announcements
 
           The radio can read itself out — frequency once the dial stops moving,
