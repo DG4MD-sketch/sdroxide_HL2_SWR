@@ -33,16 +33,30 @@ use crate::{AgcMode, Mode, NrLevel};
 /// override says about a setting the operator has not touched, and what a
 /// comparison against another profile is testing for. A [`Mode::default_profile`]
 /// fills every field.
+///
+/// A field with no opinion is left out of `modeprofiles.json` rather than
+/// written as `null`, so the file shows only what the operator changed.
+/// That makes this a JSON-only type: postcard numbers fields by position, and
+/// a skipped one would desynchronise every field after it, so it must not be
+/// put on the wire as it stands.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ModeProfile {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub agc: Option<AgcMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub agc_max_gain_db: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manual_gain_db: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub squelch_db: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub noise_reduction: Option<NrLevel>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_notch: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub wfm_stereo: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub binaural: Option<bool>,
 }
 
@@ -266,6 +280,16 @@ mod tests {
         assert_eq!(effective.agc, Mode::Usb.default_profile().agc);
         profiles.set(Mode::Usb, ModeProfile::default());
         assert_eq!(profiles.overrides(Mode::Usb), None, "an empty override is forgotten");
+    }
+
+    #[test]
+    fn the_file_holds_only_what_was_changed() {
+        let mut profiles = ModeProfiles::default();
+        profiles.set(Mode::Usb, ModeProfile { auto_notch: Some(true), ..Default::default() });
+        let json = serde_json::to_string(&profiles).unwrap();
+        assert_eq!(json, r#"{"modes":{"Usb":{"auto_notch":true}}}"#);
+        let back: ModeProfiles = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, profiles);
     }
 
     #[test]
