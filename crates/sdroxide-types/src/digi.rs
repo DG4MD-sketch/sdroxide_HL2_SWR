@@ -520,6 +520,14 @@ pub struct DigiStatus {
     /// whenever no station is being worked. See [`QsoLive`].
     #[serde(default)]
     pub qso: Option<QsoLive>,
+    /// ACARS status, when that mode is selected. `None` in every other mode,
+    /// as the rest of these are.
+    ///
+    /// Last in the struct for the usual reason: postcard numbers fields by
+    /// position, and a field added in the middle would shift the tail for every
+    /// peer that matches the protocol version but not this build.
+    #[serde(default)]
+    pub acars: Option<AcarsStatus>,
 }
 
 /// The running detail of the contact in progress: when it started and what has
@@ -818,6 +826,44 @@ pub struct NavtexStatus {
     pub reverse: bool,
 }
 
+/// Most ACARS messages kept. A busy channel produces a few a minute and the
+/// pane is a rolling view, not a log.
+pub const ACARS_MESSAGE_MAX: usize = 300;
+
+/// One decoded ACARS message.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct AcarsMessage {
+    /// The mode character, as text.
+    pub mode: String,
+    /// The aircraft address, trimmed.
+    pub address: String,
+    /// The technical acknowledgement character.
+    pub ack: String,
+    /// The two-character message label.
+    pub label: String,
+    /// The block identifier.
+    pub block_id: String,
+    /// The message text.
+    pub text: String,
+    /// Whether the block-check sequence matched.
+    pub crc_ok: bool,
+    /// When it was decoded, Unix seconds UTC.
+    pub at: i64,
+}
+
+/// What the ACARS receiver is doing.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AcarsStatus {
+    /// Smoothed audio level, for a meter.
+    pub level: f32,
+    /// Messages received, newest last.
+    pub messages: Vec<AcarsMessage>,
+    /// Frames decoded with a good block check.
+    pub frames: u64,
+    /// Frames whose block check failed.
+    pub bad: u64,
+}
+
 /// Most frames kept for the monitor pane. A busy VHF channel produces a few a
 /// second, and the pane is a rolling view rather than a log.
 pub const PACKET_HEARD_MAX: usize = 200;
@@ -887,6 +933,7 @@ impl DigiStatus {
             rade: None,
             packet: None,
             navtex: None,
+            acars: None,
             aprs: None,
             js8: None,
             atchat: None,

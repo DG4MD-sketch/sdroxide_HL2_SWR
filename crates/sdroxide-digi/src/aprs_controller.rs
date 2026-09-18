@@ -635,6 +635,7 @@ impl AprsController {
             rade: None,
             packet: None,
             navtex: None,
+            acars: None,
             aprs: Some(Box::new(self.aprs_status())),
             js8: None,
             atchat: None,

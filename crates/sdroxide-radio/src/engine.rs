@@ -17,8 +17,8 @@ use sdroxide_adsb::{AdsbAction, AdsbController};
 use sdroxide_ais::{AisAction, AisController};
 use sdroxide_config::BandStacks;
 use sdroxide_digi::{
-    AprsController, AtChatController, CwController, DigiAction, DigiController, DigiEngine,
-    FsqController, HellController, Js8Controller, NavtexController, PacketController,
+    AcarsController, AprsController, AtChatController, CwController, DigiAction, DigiController,
+    DigiEngine, FsqController, HellController, Js8Controller, NavtexController, PacketController,
     RadeController, RfPaintController, RifpController, SstvController, TextModemController,
     WefaxController, WsprController,
 };
@@ -6465,6 +6465,11 @@ impl Engine {
             // a framing of its own — and nothing further down would notice it
             // had been handed a maritime safety broadcast.
             Box::new(NavtexController::new(self.digi_config.clone(), tap_rate))
+        } else if mode == Mode::Acars {
+            // The same shape of thing as NAVTEX: the framing is its own and
+            // nothing further down would notice it had been handed an airline
+            // datalink rather than a radio amateur's text.
+            Box::new(AcarsController::new(self.digi_config.clone(), tap_rate))
         } else if mode.is_rifp() {
             Box::new(RifpController::new(self.digi_config.clone(), tap_rate))
         } else if mode.is_aprs() {
@@ -16594,7 +16599,7 @@ fn rig_mode_class(m: Mode) -> u8 {
         | Mode::Spec => 1,
         // DRM sits on the dial in a channel about as wide as AM's, and a
         // rig has no DRM setting to report back — see `to_hamlib_mode`.
-        Mode::Am | Mode::Sam | Mode::Dsb | Mode::Isb | Mode::Drm => 2,
+        Mode::Am | Mode::Sam | Mode::Dsb | Mode::Isb | Mode::Drm | Mode::Acars => 2,
         Mode::Cw => 3,
         // RIFP, VHF packet, APRS, VHF SSTV and VHF RTTY are data on an FM
         // carrier, so a rig reporting plain FM is still where we left it.

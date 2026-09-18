@@ -181,6 +181,9 @@ pub fn make_demod(mode: Mode, channel_rate: f64) -> Option<Box<dyn Demodulator>>
         // sideband filter.
         Mode::Rifp => Some(Box::new(FskDemod::new(channel_rate, lo, hi))),
         Mode::Am => Some(Box::new(AmDemod::new(channel_rate, lo, hi))),
+        // ACARS is AM: the envelope detector hands the digi engine the audio the
+        // MSK is carried in, exactly as it does for a voice channel.
+        Mode::Acars => Some(Box::new(AmDemod::new(channel_rate, lo, hi))),
         Mode::Isb => Some(Box::new(IsbDemod::new(channel_rate, lo, hi))),
         Mode::Sam => Some(Box::new(SamDemod::new(channel_rate, lo, hi))),
         // VHF SSTV takes the NFM voice path rather than the flat packet one,

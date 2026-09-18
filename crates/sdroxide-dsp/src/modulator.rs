@@ -67,6 +67,8 @@ pub fn make_modulator(mode: Mode, rate: f64, passband: (f32, f32)) -> Option<Box
         // modulator means the transmit gate refuses the over rather than
         // putting something else on the air under an ISB label.
         Mode::Isb => None,
+        // ACARS is receive only — an airline service, not an amateur one.
+        Mode::Acars => None,
         // VHF SSTV modulates the carrier through the voice FM path — see the
         // demodulator, which is its other half: the picture goes into an FM
         // transmitter exactly as speech would.

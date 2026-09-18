@@ -262,6 +262,13 @@ pub enum Mode {
     /// station's frequency and the digital sidebands sit either side of it.
     /// Appended for the same reason as [`Mode::Hell`].
     HdRadio,
+    /// ACARS — the VHF aircraft datalink around 130 MHz (issue #436): an AM
+    /// carrier in the airband carrying 2400-baud MSK, character-oriented, with
+    /// odd parity and a 16-bit block check. Receive only: it is an airline
+    /// service, not an amateur one.
+    ///
+    /// Appended for the same reason as [`Mode::Hell`].
+    Acars,
 }
 
 /// The bands on which a mode that keeps phone practice rides the lower
@@ -282,7 +289,7 @@ const PHONE_LSB_BANDS: [(f64, f64); 3] =
 impl Mode {
     /// Every mode, in the order they cycle and appear in the picker — which is
     /// deliberately *not* the enum's declaration order (see [`Mode::Hell`]).
-    pub const ALL: [Mode; 40] = [
+    pub const ALL: [Mode; 41] = [
         Mode::Lsb,
         Mode::Usb,
         Mode::Cw,
@@ -316,6 +323,7 @@ impl Mode {
         Mode::Rifp,
         Mode::Wefax,
         Mode::Navtex,
+        Mode::Acars,
         Mode::Olivia,
         Mode::Thor,
         Mode::Fsq,
@@ -328,8 +336,9 @@ impl Mode {
     /// The digital modes handled by a dedicated decode/encode engine (the
     /// slotted FT8/FT4 modes, the continuous keyboard modes, Hell, SSTV, RIFP,
     /// packet, RF Paint). All are USB underneath except RIFP, VHF packet and
-    /// VHF SSTV, which frequency-modulate the carrier.
-    pub const DIGITAL: [Mode; 23] = [
+    /// VHF SSTV, which frequency-modulate the carrier, and ACARS, which is
+    /// received in AM.
+    pub const DIGITAL: [Mode; 24] = [
         Mode::Ft8,
         Mode::Ft4,
         Mode::Ft2,
@@ -348,6 +357,7 @@ impl Mode {
         Mode::Rifp,
         Mode::Wefax,
         Mode::Navtex,
+        Mode::Acars,
         Mode::RfPaint,
         Mode::Rade,
         Mode::Packet,
@@ -359,7 +369,8 @@ impl Mode {
     pub fn is_digital(self) -> bool {
         matches!(
             self,
-            Mode::Ft8
+            Mode::Acars
+                | Mode::Ft8
                 | Mode::Ft4
                 | Mode::Ft2
                 | Mode::Js8
@@ -460,8 +471,17 @@ impl Mode {
     /// frequency-modulates it. HF packet is *not* one of these — 300 baud is
     /// audio on a sideband like any other keyboard mode. APRS is VHF packet
     /// under another name, so it is.
+    ///
+    /// ACARS is the receive-side case of the same thing: its MSK is the
+    /// modulation of an AM carrier, so the rig belongs in AM with the dial on
+    /// the carrier. Left out, it was commanded onto the digital modes' sideband
+    /// while the engine expected AM back, and every mode report from the rig
+    /// was answered by commanding the mode again.
     pub fn is_carrier_centered(self) -> bool {
-        matches!(self, Mode::Rifp | Mode::Packet | Mode::Aprs | Mode::SstvFm | Mode::RttyFm)
+        matches!(
+            self,
+            Mode::Rifp | Mode::Packet | Mode::Aprs | Mode::SstvFm | Mode::RttyFm | Mode::Acars
+        )
     }
 
     /// True for the modes that go out on a *frequency-modulated* carrier.
@@ -652,6 +672,7 @@ impl Mode {
             Mode::Wefax
                 | Mode::Adsb
                 | Mode::Navtex
+                | Mode::Acars
                 | Mode::Vdl2
                 | Mode::Isb
                 | Mode::Ais
@@ -708,6 +729,7 @@ impl Mode {
             Mode::Rtty => "RTTY",
             Mode::RttyFm => "RTTY-FM",
             Mode::Navtex => "NAVTEX",
+            Mode::Acars => "ACARS",
             Mode::Sstv => "SSTV",
             Mode::SstvFm => "SSTV-FM",
             Mode::Olivia => "OLIVIA",
@@ -870,6 +892,9 @@ impl Mode {
             // either side leaves room for a receiver that is not exactly on the
             // channel, which is the usual state of a signal found by ear.
             Mode::Navtex => (1300.0, 2100.0),
+            // ACARS' MSK sits at 1200 and 2400 Hz on the AM carrier, so the
+            // passband has to keep both tones and the carrier between them.
+            Mode::Acars => (-3000.0, 3000.0),
             // WSPR lives in one 200 Hz window, 1400–1600 Hz above the dial, and
             // the decoder searches nowhere else. Narrow rather than the usual
             // digital 100–3300 on purpose: the QRSS beacons just below the
@@ -1048,7 +1073,7 @@ impl Mode {
             // ISB joins them for the same reason DSB does: the carrier is on
             // the dial and a rig with an I.F. output has no separate setting
             // for it.
-            Mode::Am | Mode::Sam | Mode::Dsb | Mode::Drm | Mode::Isb => C::Am,
+            Mode::Am | Mode::Sam | Mode::Acars | Mode::Dsb | Mode::Drm | Mode::Isb => C::Am,
             // WFM is FM's carrier position too; a rig with an I.F. output has
             // no such mode, so nothing here is lost by grouping them.
             // ADS-B joins them for the same reason WFM does: no radio with an
@@ -1301,6 +1326,7 @@ impl Mode {
             | Mode::Rifp
             | Mode::Wefax
             | Mode::Navtex
+            | Mode::Acars
             | Mode::PacketHf
             | Mode::Rade
             | Mode::HdRadio => &[],
@@ -1783,6 +1809,7 @@ mod tests {
             (Mode::Ais, 37),
             (Mode::AtChat, 38),
             (Mode::HdRadio, 39),
+            (Mode::Acars, 40),
         ];
         for (mode, index) in pinned {
             assert_eq!(mode as u8, index, "{} moved", mode.label());
@@ -1829,7 +1856,7 @@ mod tests {
         // dropped and nothing listed twice.
         // The last variant *by discriminant*, which is the one appended most
         // recently — not the one that reads last in the picker.
-        let last = Mode::HdRadio as u8;
+        let last = Mode::Acars as u8;
         for i in 0..=last {
             let present = Mode::ALL.iter().filter(|m| **m as u8 == i).count();
             assert_eq!(present, 1, "discriminant {i} appears {present} times in Mode::ALL");
@@ -1844,6 +1871,16 @@ mod tests {
     /// sits 2210 Hz above the dial, so the contact is logged there; on a channel
     /// the tones are inside the FM carrier and the dial *is* the frequency.
     /// Copying `Mode::Rtty`'s answer would log every VHF bulletin 2.2 kHz high.
+    /// ACARS is received off an AM carrier: the dial is the carrier, not the
+    /// bottom of a sideband, so the rig is commanded AM and the frequency of a
+    /// message is the dial's.
+    #[test]
+    fn acars_is_an_am_channel_not_a_sideband() {
+        assert!(Mode::Acars.is_digital(), "it has a decoder and a panel");
+        assert!(Mode::Acars.is_carrier_centered(), "the dial is the carrier");
+        assert!(!Mode::Acars.tunes_off_dial());
+    }
+
     #[test]
     fn rtty_on_fm_is_a_channel_not_a_sideband() {
         assert!(Mode::RttyFm.is_text_modem(), "it is the RTTY modem and wants the RTTY panel");

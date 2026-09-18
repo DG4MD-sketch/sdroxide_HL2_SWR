@@ -1,3 +1,4 @@
+pub mod acars;
 mod adc;
 pub mod afsk;
 mod agc;
@@ -85,6 +86,7 @@ pub use navtex::{
 pub mod navtex_test {
     pub use crate::navtex::{encode_bits, synth};
 }
+pub use acars::{AcarsEvent, AcarsRx, CENTER_HZ as ACARS_CENTER_HZ};
 pub use nb::NoiseBlanker;
 pub use nco::Nco;
 pub use nnr::NeuralNr;

@@ -117,6 +117,7 @@ impl<'a> Speaker<'a> {
             Mode::Usb => "U S B",
             Mode::Cw => "C W",
             Mode::Am => "A M",
+            Mode::Acars => "A cars",
             Mode::Sam => "synchronous A M",
             Mode::Nfm => "narrow F M",
             Mode::Wfm => "wide F M",

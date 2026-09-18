@@ -2133,7 +2133,8 @@ fn apply_line(port: &mut dyn Link, forced: LineState, rts: bool) {
 /// rides a sideband. The carrier-centred modes (RIFP, VHF packet) frequency-modulate
 /// the carrier instead: sending them as USB puts the rig in the wrong
 /// modulation entirely, and nothing downstream would say so. Those fall
-/// through to `mode_control`, where each protocol's own map answers DATA-FM.
+/// through to `mode_control`, where each protocol's own map answers DATA-FM —
+/// or AM, for ACARS, which is received off an AM carrier.
 ///
 /// CW keyed as audio (`CwKeying::Audio`) rides the digi sideband too: a rig
 /// put in CW keys its own transmitter and never modulates what arrives at its
@@ -3574,6 +3575,21 @@ mod tests {
         // not overruled by the picture they chose.
         let hands_off = CatConfig { mode_control: ModeControl::Radio, ..CatConfig::default() };
         assert_eq!(commanded_mode(&hands_off, Mode::SstvFm, None), None);
+    }
+
+    /// ACARS is MSK on an AM carrier, so the rig goes to AM whatever
+    /// `digi_mode` says. On the digi sideband the engine — which expects an AM
+    /// report back — answered every poll by commanding the mode again.
+    #[test]
+    fn acars_is_commanded_as_am_and_not_on_the_digi_sideband() {
+        for digi in [DigiMode::Radio, DigiMode::Usb, DigiMode::Data] {
+            let cfg = CatConfig { digi_mode: digi, ..CatConfig::default() };
+            let at = Some(131_550_000.0);
+            assert_eq!(commanded_mode(&cfg, Mode::Acars, at), Some(Mode::Acars), "{digi:?}");
+        }
+        assert_eq!(civ::mode_to_civ(Mode::Acars), civ::mode_to_civ(Mode::Am));
+        let hands_off = CatConfig { mode_control: ModeControl::Radio, ..CatConfig::default() };
+        assert_eq!(commanded_mode(&hands_off, Mode::Acars, None), None);
     }
 
     /// Issue #313: the picture goes out of the same sound card every other

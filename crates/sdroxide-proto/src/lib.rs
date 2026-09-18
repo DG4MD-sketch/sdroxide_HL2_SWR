@@ -1355,13 +1355,23 @@ use sdroxide_types::{
 /// decode the message carrying one. `ServerMsg` gains `Profiles`, the names
 /// to offer, appended last for the same reason: a v152 client handed the list
 /// fails to decode it.
-/// v154: per-mode settings. The engine applies AGC, squelch, noise reduction
+///
+/// v154: ACARS, the VHF airband airline datalink (issue #436). `Mode::Acars` is
+/// appended last, so no surviving discriminant moved, but a v153 peer has no
+/// name for it. The status rides the existing `RadioEvent::Ft8Status` /
+/// `ServerMsg::Ft8Status`, so there is no new message — but `DigiStatus` gains
+/// a trailing `acars` field, and postcard numbers struct fields by position, so
+/// a v153 peer desynchronises on the tail of every `DigiStatus`. The field is
+/// last, so no surviving field moved.
+///
+/// v155: per-mode settings. The engine applies AGC, squelch, noise reduction
 /// and the rest from a profile when the mode changes, and remembers what the
 /// operator changes while a mode is selected, so `Command` gains
 /// `ResetModeDefaults` — appended, so no surviving discriminant moved. The
-/// profiles themselves travel as receiver state, so a v153 peer's state decode
-/// is unchanged; it just cannot ask for a reset.
-pub const PROTO_VERSION: u16 = 154;
+/// profiles themselves travel as receiver state, so a v154 peer's state decode
+/// is unchanged; it just cannot ask for a reset. Numbered after ACARS because
+/// that landed upstream first (the two were in flight together).
+pub const PROTO_VERSION: u16 = 155;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]

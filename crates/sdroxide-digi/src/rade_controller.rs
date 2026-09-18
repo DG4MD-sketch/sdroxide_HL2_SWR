@@ -107,6 +107,7 @@ fn build_status(
         rade,
         packet: None,
         navtex: None,
+        acars: None,
         aprs: None,
         js8: None,
         atchat: None,
