@@ -496,8 +496,10 @@ pub fn show(
         for (k, line) in lines.into_iter().enumerate() {
             let colour = alpha(tint, if k == 0 { 240.0 } else { 185.0 });
             let galley = p.layout_no_wrap(line, font.clone(), colour);
-            let at =
-                pos2(anchor.x + 2.0, anchor.y - (n - 1 - k) as f32 * 10.0 - galley.size().y / 2.0);
+            // Each line centred half a line above the tick's end, so the last
+            // one sits on the tick rather than being cut through by it.
+            let mid = anchor.y - (n - 1 - k) as f32 * 10.0 - 5.0;
+            let at = pos2(anchor.x + 2.0, mid - galley.size().y / 2.0);
             let line_rect = Rect::from_min_size(at, galley.size());
             area = Some(area.map_or(line_rect, |a| a.union(line_rect)));
             drawn.push((at, galley, colour));
