@@ -1443,6 +1443,49 @@ pub fn chip_link(ui: &mut Ui, selected: bool, size: egui::Vec2) -> Response {
     resp
 }
 
+/// A chip carrying an anticlockwise arrow — "put it back" — instead of a label,
+/// at an exact size. Painted rather than typed for the reason [`chip_link`]
+/// gives, and inked the same way.
+///
+/// The RX box's way back to a mode's defaults. That box keeps the chip's room
+/// in every mode whether it is showing or not, so the box does not widen under
+/// the click that makes it appear — and the word DEFAULTS, at 79 pt, cost the
+/// narrowest desktop strip a whole row to keep room for.
+pub fn chip_reset(ui: &mut Ui, size: egui::Vec2) -> Response {
+    let resp = chip_impl(ui, false, RichText::new(""), None, Sense::click(), Some(size));
+    if ui.is_rect_visible(resp.rect) {
+        let ink = ui.style().interact_selectable(&resp, false).fg_stroke.color;
+        let stroke = Stroke::new((size.y * 0.07).clamp(1.4, 2.2), ink);
+        let r = resp.rect.height() * 0.26;
+        let c = resp.rect.center();
+        let at = |a: f32| Pos2::new(c.x + r * a.cos(), c.y + r * a.sin());
+        // Seven-eighths of a circle, run anticlockwise on screen (the angle
+        // falls, y being down) from the left round through the bottom, the
+        // right and the top, so the gap — and the head — sit at the upper left.
+        let (from, to) = (std::f32::consts::PI, -0.75 * std::f32::consts::PI);
+        const STEPS: usize = 28;
+        let arc: Vec<Pos2> =
+            (0..=STEPS).map(|i| at(from + (to - from) * i as f32 / STEPS as f32)).collect();
+        let p = ui.painter();
+        p.add(Shape::line(arc, stroke));
+        // The head, pointing along the way the arc was travelling.
+        let end = at(to);
+        let dir = vec2(to.sin(), -to.cos());
+        let out = vec2(to.cos(), to.sin());
+        let a = r * 0.75;
+        p.add(Shape::convex_polygon(
+            vec![
+                end + dir * a * 0.6,
+                end - dir * a * 0.4 + out * a * 0.55,
+                end - dir * a * 0.4 - out * a * 0.55,
+            ],
+            ink,
+            Stroke::NONE,
+        ));
+    }
+    resp
+}
+
 /// A chip stretched to an exact `size` rather than hugging its label — for the
 /// compact strip's button grid, whose rows divide the width they were given
 /// between them instead of clustering at one end of it. The label stays

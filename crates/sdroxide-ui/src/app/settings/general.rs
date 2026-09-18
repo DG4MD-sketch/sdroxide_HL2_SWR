@@ -483,8 +483,9 @@ impl SdroxideApp {
             RichText::new(
                 "Selecting a mode lays that mode's own starting values for AGC, squelch, noise \
                  reduction, the notch and the stereo switches on the receiver, and changing one \
-                 remembers it for that mode alone. The DEFAULTS chip beside the receiver controls \
-                 lists what has been changed and puts the current mode back.",
+                 remembers it for that mode alone. The circular-arrow chip at the end of the \
+                 receiver's filter/noise row lists what has been changed and puts the current \
+                 mode back.",
             )
             .size(10.5)
             .color(crate::theme::gray(140)),

@@ -2725,7 +2725,6 @@ impl SdroxideApp {
             for &c in &chips[lifted..] {
                 self.rx_chip(ui, cmds, c, narrow);
             }
-            self.mode_defaults_chip(ui, cmds);
         });
         if narrow {
             // The filter rows, the engine picker and the recording rows the
@@ -2743,7 +2742,9 @@ impl SdroxideApp {
     /// (see [`sdroxide_types::ModeProfile`]); this is the way back, next to the
     /// controls it concerns rather than buried in Settings. Nothing is drawn
     /// when the mode is sitting on its defaults, so the chip's presence is
-    /// itself the "something here is yours and not the mode's" signal.
+    /// itself the "something here is yours and not the mode's" signal — but
+    /// its room is kept either way ([`RxChip::Defaults`]), so the box is the
+    /// same width with it as without.
     fn mode_defaults_chip(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<Command>) {
         let rx = &self.state.rx[0];
         let defaults = rx.mode.default_profile();
@@ -2783,12 +2784,13 @@ impl SdroxideApp {
         }
         let mode = rx.mode;
         let hover = format!(
-            "Changed from {}'s defaults: {}.\n\nClick to put them back. \
-             The mode's own values return, and what you set here is forgotten.",
+            "Back to {0}'s defaults. Changed from them: {1}.\n\nClick to put them back. \
+             {0}'s own values return, and what you set here is forgotten.",
             mode.label(),
             changed.join(", ")
         );
-        if crate::chrome::chip(ui, false, "DEFAULTS").on_hover_text(hover).clicked() {
+        let side = defaults_chip_side(ui);
+        if crate::chrome::chip_reset(ui, egui::vec2(side, side)).on_hover_text(hover).clicked() {
             cmds.push(Command::ResetModeDefaults { mode: Some(mode) });
         }
     }
@@ -3019,6 +3021,7 @@ impl SdroxideApp {
                     self.show_hd = !self.show_hd;
                 }
             }
+            RxChip::Defaults => self.mode_defaults_chip(ui, cmds),
             RxChip::Tone => {
                 // CTCSS/DCS: what is coming in, and optionally what has to be
                 // present before the audio opens. Only NFM carries either.
@@ -5574,6 +5577,16 @@ enum RxChip {
     Hd,
     /// NFM's sub-audible tone.
     Tone,
+    /// The way back to the mode's own settings, drawn only while they differ
+    /// ([`SdroxideApp::mode_defaults_chip`]) but reserved in every mode.
+    Defaults,
+}
+
+/// The side of the square the defaults chip is drawn in: as tall as the chips
+/// beside it, and no wider — see [`crate::chrome::chip_reset`] for why it is an
+/// arrow and not a word.
+fn defaults_chip_side(ui: &egui::Ui) -> f32 {
+    crate::chrome::chip_height(ui, None)
 }
 
 impl RxChip {
@@ -5616,10 +5629,16 @@ impl RxChip {
             // rather than a decode, and a DCS code reads longer than any
             // CTCSS tone.
             Self::Tone => "·D023N",
+            // No label at all: it is a painted arrow, and `width` prices it as
+            // the square it is drawn in.
+            Self::Defaults => "",
         }
     }
 
     fn width(self, ui: &egui::Ui) -> f32 {
+        if self == Self::Defaults {
+            return defaults_chip_side(ui);
+        }
         if self == Self::Bw {
             // Every scale `bw_chip_label` can reach, at the widest digits: a
             // 250 Hz CW filter and the two megahertz an ADS-B receiver reads
@@ -5771,6 +5790,13 @@ fn rx_chips(mode: Mode) -> Vec<RxChip> {
         Mode::Nfm => chips.push(RxChip::Tone),
         _ => {}
     }
+    // Last, and in every mode, whether or not it is showing: it comes and goes
+    // as the operator turns a switch or drags the squelch, and a box that
+    // widened under that click would re-break the strip — and, before it was
+    // counted here at all, ran the RX box's row past its own edge and pushed
+    // the boxes after it off the window. Last, too, so the gap it leaves when
+    // it is not drawn is at the end of a row rather than in the middle of one.
+    chips.push(RxChip::Defaults);
     chips
 }
 
@@ -8088,6 +8114,11 @@ mod tests {
                             // what the box reserved for it.
                             let draw = |ui: &mut egui::Ui, run: &[RxChip]| {
                                 for c in run {
+                                    if *c == RxChip::Defaults {
+                                        let side = defaults_chip_side(ui);
+                                        crate::chrome::chip_reset(ui, egui::vec2(side, side));
+                                        continue;
+                                    }
                                     crate::chrome::chip_accent(
                                         ui,
                                         false,
@@ -8176,6 +8207,17 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// Every mode keeps room for the reset chip, at the end of the run. It
+    /// comes and goes under the operator's own clicks; drawn after the run
+    /// instead of in it, it was never priced, and appearing it ran the noise
+    /// row past the box's edge and pushed the boxes after it off the window.
+    #[test]
+    fn every_mode_keeps_room_for_the_defaults_chip() {
+        for mode in Mode::ALL {
+            assert_eq!(rx_chips(mode).last(), Some(&RxChip::Defaults), "{mode:?}");
         }
     }
 

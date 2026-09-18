@@ -826,7 +826,7 @@ These are the same controls that live under **Settings → Radio**
 what each one needs from the radio is; they are here so that changing bands and
 reaching for the other aerial do not mean opening a dialog.
 
-#### Per-mode settings (the DEFAULTS chip)
+#### Per-mode settings (the reset chip)
 
 The settings in this box are a matter of taste, but not the same taste in every
 mode: a little noise reduction helps a weak SSB voice and only gets in the way
@@ -853,9 +853,11 @@ with it off. Put a setting back to the mode's default and it stops being an
 override on its own. On the first start after upgrading to a version with
 per-mode settings, what you had set becomes the values for the mode you were
 in, and every other mode starts from its own defaults. When anything in the current mode has been changed, a
-**DEFAULTS** chip appears in the filter/noise row: hovering it names what
-differs, and clicking it puts the mode's own values back and forgets what you
-had set. A station's per-mode values live in `modeprofiles.json` beside its
+chip with a **circular arrow** appears at the end of the filter/noise row:
+hovering it names what differs, and clicking it puts the mode's own values back
+and forgets what you had set. Its place in the row is kept while it is hidden,
+so the box does not change width — and the strip does not rearrange itself — as
+it comes and goes. A station's per-mode values live in `modeprofiles.json` beside its
 other per-radio files and travel with **Settings → Import/Export**; **Settings
 → General → Per-mode settings** has a **RESET EVERY MODE** button that clears
 them all at once.
@@ -1720,7 +1722,7 @@ press **SQL** to use the receiver's own squelch, which makes the scan stop
 exactly where the audio would have opened — one control instead of two. Note
 that with the squelch slider at `off` the scan will stop on the first channel it
 looks at, since every channel then counts as busy. The squelch is one of the
-per-mode settings (see *Per-mode settings (the DEFAULTS chip)*), so **SQL** uses
+per-mode settings (see *Per-mode settings (the reset chip)*), so **SQL** uses
 the squelch of the mode being scanned: a frequency scan in NFM started from
 SSB stops at NFM's squelch, which is open until you set one there, and a memory
 scan judges each channel by the squelch of the mode it was stored in. Set it
