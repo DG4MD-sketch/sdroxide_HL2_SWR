@@ -600,7 +600,7 @@ pub fn config_dir() -> Result<PathBuf, ConfigError> {
 /// migration and stays downgrade-safe.
 ///
 /// Only the files that describe *a radio* are scoped: `radio.json`,
-/// `session.json`, `scanner.json`, `tciserver.json`, `rigctld.json`,
+/// `session.json`, `scanner.json`, `modeprofiles.json`, `tciserver.json`, `rigctld.json`,
 /// `wsjtx.json`. Everything the operator shares across radios — memories,
 /// band stacks, the logbook, `config.toml` — stays on the root free functions.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -725,12 +725,44 @@ impl Store {
 
     /// The remembered dial and mode, or the defaults on a first run.
     pub fn load_session(&self) -> Session {
+        self.load_session_if_present().unwrap_or_default()
+    }
+
+    /// The remembered session, or `None` when there is not one to restore —
+    /// no `session.json`, or one that failed [`Session::is_usable`].
+    ///
+    /// The engine has to tell "a session was restored" from "this is a first
+    /// run" apart. A mode's default profile is applied at startup only when
+    /// nothing was restored: laying it over a restored session would reset the
+    /// operator's saved AGC, squelch, noise reduction, binaural and RX gain to
+    /// the mode's defaults, which is exactly what a station upgrading to a
+    /// build with per-mode settings would hit, its `modeprofiles.json` still
+    /// empty.
+    pub fn load_session_if_present(&self) -> Option<Session> {
+        // The file has to be *there*: [`Session::default`] is itself usable, so
+        // `load` alone cannot tell a first run from a session that was saved.
+        let dir = self.dir().ok()?;
+        if !matches!(read_config_text(&dir, "session.json"), FileText::Text(_)) {
+            return None;
+        }
         let s: Session = self.load("session.json");
-        if s.is_usable() { s.sanitized() } else { Session::default() }
+        if s.is_usable() { Some(s.sanitized()) } else { None }
     }
 
     pub fn save_session(&self, session: &Session) -> Result<(), ConfigError> {
         self.save("session.json", session)
+    }
+
+    /// This station's per-mode settings overrides, or none on a first run.
+    pub fn load_mode_profiles(&self) -> sdroxide_types::ModeProfiles {
+        self.load("modeprofiles.json")
+    }
+
+    pub fn save_mode_profiles(
+        &self,
+        profiles: &sdroxide_types::ModeProfiles,
+    ) -> Result<(), ConfigError> {
+        self.save("modeprofiles.json", profiles)
     }
 
     pub fn load_scanner_config(&self) -> sdroxide_types::ScannerConfig {

@@ -1113,4 +1113,17 @@ pub enum Command {
     ///
     /// Appended for the usual reason — postcard numbers variants by position.
     ProfileDelete(String),
+    /// Forget the operator's per-mode settings overrides — for one mode, or
+    /// (`None`) for every mode — and put the defaults back on any receiver
+    /// sitting in a mode that was cleared.
+    ///
+    /// The counterpart of the overrides the engine records when a setting is
+    /// changed while a mode is selected. This is the "put it back the way the
+    /// mode ships" an operator reaches for after fiddling; the values it
+    /// restores are [`Mode::default_profile`]'s. Appended for the usual reason
+    /// too.
+    ResetModeDefaults {
+        mode: Option<Mode>,
+    },
+
 }

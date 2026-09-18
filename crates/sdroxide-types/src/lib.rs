@@ -36,6 +36,7 @@ mod mode;
 mod netcfg;
 mod pictures;
 mod probe;
+mod profile;
 mod prop_store;
 mod propagation;
 pub mod publicsdr;
@@ -172,6 +173,7 @@ pub use pictures::{
     ImageSlotInfo, received_at, safe_name,
 };
 pub use probe::{DeviceProbe, ProbeAnswer, ProbeTest, ReportKind, TestKind};
+pub use profile::{ModeProfile, ModeProfiles};
 pub use prop_store::{PropSources, PropStore};
 pub use propagation::{
     BandPlane, DEFAULT_HALFLIFE_S as PROP_DEFAULT_HALFLIFE_S, DEFAULT_HM_KM, GRID_CELLS,

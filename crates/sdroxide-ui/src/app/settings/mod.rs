@@ -1860,6 +1860,11 @@ impl SdroxideApp {
                 ui.add_space(10.0);
                 ui.separator();
                 ui.add_space(6.0);
+                self.settings_mode_defaults(ui, cmds);
+
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(6.0);
                 // This screen's own speaker and microphone, and nothing else.
                 // The *radio's* sound card and the gain on what comes back off
                 // it are the radio's, not the program's, and live on the Radio
