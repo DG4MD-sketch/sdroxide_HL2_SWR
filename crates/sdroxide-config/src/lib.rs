@@ -663,6 +663,20 @@ impl Store {
         }
     }
 
+    /// [`Store::load`], but `None` rather than the defaults when there is no
+    /// file to read — missing, unreadable, or quarantined for not parsing.
+    fn load_if_present<T: serde::de::DeserializeOwned>(&self, file: &str) -> Option<T> {
+        let dir = self.dir().ok()?;
+        let FileText::Text(text) = read_config_text(&dir, file) else { return None };
+        match serde_json::from_str(&text) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                quarantine_unreadable(&dir, file, &e);
+                None
+            }
+        }
+    }
+
     fn save<T: serde::Serialize>(&self, file: &str, value: &T) -> Result<(), ConfigError> {
         let dir = self.dir()?;
         let text = serde_json::to_string_pretty(value).expect("serialize");
@@ -732,20 +746,15 @@ impl Store {
     /// no `session.json`, or one that failed [`Session::is_usable`].
     ///
     /// The engine has to tell "a session was restored" from "this is a first
-    /// run" apart. A mode's default profile is applied at startup only when
-    /// nothing was restored: laying it over a restored session would reset the
-    /// operator's saved AGC, squelch, noise reduction, binaural and RX gain to
-    /// the mode's defaults, which is exactly what a station upgrading to a
-    /// build with per-mode settings would hit, its `modeprofiles.json` still
-    /// empty.
+    /// run" apart: a restored session's levels are recorded as the per-mode
+    /// values of the mode it was left in, and a first run's must not be. Those
+    /// are [`Session::default`]'s, which nobody chose, and would be recorded as
+    /// departures from a mode that starts differently — FT8's slow AGC, for
+    /// one.
     pub fn load_session_if_present(&self) -> Option<Session> {
         // The file has to be *there*: [`Session::default`] is itself usable, so
         // `load` alone cannot tell a first run from a session that was saved.
-        let dir = self.dir().ok()?;
-        if !matches!(read_config_text(&dir, "session.json"), FileText::Text(_)) {
-            return None;
-        }
-        let s: Session = self.load("session.json");
+        let s: Session = self.load_if_present("session.json")?;
         if s.is_usable() { Some(s.sanitized()) } else { None }
     }
 

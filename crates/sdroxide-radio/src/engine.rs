@@ -3670,14 +3670,16 @@ fn engine_thread(
     // further down: the remembered decimation decides what rate the analyzer
     // and the receiver chain are built at, and building them at the device rate
     // first would mean tearing them down again before the first block.
-    let session = engine_cfg.remember_session.then(|| engine_cfg.store.load_session());
-    // Whether that session came off the disk or is the default. `load_session`
-    // answers a default either way — which is what keeps an engine remembering
-    // from its first change — so the file's presence has to be asked
-    // separately. Only a *restored* session's levels are recorded as its mode's
-    // own values at startup; see the profile block below.
-    let session_restored =
-        engine_cfg.remember_session && engine_cfg.store.load_session_if_present().is_some();
+    //
+    // Whether it came off the disk is held apart from the session itself. An
+    // engine that remembers gets a default session when there is no file —
+    // which is what keeps it remembering from its first change — but only a
+    // *restored* one's levels are recorded as its mode's own values at startup;
+    // see the profile block below.
+    let restored =
+        engine_cfg.remember_session.then(|| engine_cfg.store.load_session_if_present()).flatten();
+    let session_restored = restored.is_some();
+    let session = engine_cfg.remember_session.then(|| restored.unwrap_or_default());
     // Held separately from what this front end can carry: a start on a stand-in
     // (a radio switched off, a rig that isn't there yet) must not be the thing
     // that forgets it — see `Engine::want_decimation`.
