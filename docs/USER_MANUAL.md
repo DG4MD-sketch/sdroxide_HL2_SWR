@@ -825,6 +825,37 @@ These are the same controls that live under **Settings → Radio**
 what each one needs from the radio is; they are here so that changing bands and
 reaching for the other aerial do not mean opening a dialog.
 
+#### Per-mode settings (the DEFAULTS chip)
+
+The settings in this box are a matter of taste, but not the same taste in every
+mode: a little noise reduction helps a weak SSB voice and only gets in the way
+of an FT8 decoder, and a slow AGC is kinder to a signal sitting in the noise
+than the fast one that sounds right on a strong local. So each mode carries a
+set of starting values for **AGC**, **Man**, **SQL**, **NR**, **ANC**, **BIN**
+and WFM's **ST**, and selecting a mode lays its own on the receiver.
+
+The built-in defaults are deliberately plain. A slow AGC on the weak-signal
+digital modes, whose whole point is signals near the noise, and the stock medium
+everywhere else. Noise reduction **off** in every mode: it is the setting most
+dependent on your taste, it carries a make-up gain and can add artefacts, and
+changing mode should not change how loud the radio is — set it in the modes
+where you want it and it is remembered there. The squelch open and the notch off
+everywhere, the notch because it cancels constant tones and in CW, RTTY and the
+other FSK modes the signal *is* one. Nothing is re-applied to a mode you are
+already in, so a rig reporting its own mode back never disturbs a setting you
+have just made.
+
+Change any of them and the change is remembered **for the mode you were in**,
+not globally: turn the noise reduction up on 20 m SSB and FT8 still comes up
+with it off. Put a setting back to the mode's default and it stops being an
+override on its own. When anything in the current mode has been changed, a
+**DEFAULTS** chip appears in the filter/noise row: hovering it names what
+differs, and clicking it puts the mode's own values back and forgets what you
+had set. A station's per-mode values live in `modeprofiles.json` beside its
+other per-radio files and travel with **Settings → Import/Export**; **Settings
+→ General → Per-mode settings** has a **RESET EVERY MODE** button that clears
+them all at once.
+
 ### 2.8 The display and FFT controls
 
 **Display module:**

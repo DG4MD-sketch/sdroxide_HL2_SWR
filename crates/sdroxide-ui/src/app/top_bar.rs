@@ -2725,6 +2725,7 @@ impl SdroxideApp {
             for &c in &chips[lifted..] {
                 self.rx_chip(ui, cmds, c, narrow);
             }
+            self.mode_defaults_chip(ui, cmds);
         });
         if narrow {
             // The filter rows, the engine picker and the recording rows the
@@ -2732,6 +2733,63 @@ impl SdroxideApp {
             self.filter_controls(ui, cmds);
             self.nr_controls(ui, cmds);
             self.rec_controls(ui, cmds);
+        }
+    }
+
+    /// A chip that appears only once the receiver's settings differ from the
+    /// mode's own defaults, and puts them back when clicked.
+    ///
+    /// The engine remembers what the operator changes while a mode is selected
+    /// (see [`sdroxide_types::ModeProfile`]); this is the way back, next to the
+    /// controls it concerns rather than buried in Settings. Nothing is drawn
+    /// when the mode is sitting on its defaults, so the chip's presence is
+    /// itself the "something here is yours and not the mode's" signal.
+    fn mode_defaults_chip(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<Command>) {
+        let rx = &self.state.rx[0];
+        let defaults = rx.mode.default_profile();
+        // Nothing to offer when the mode is sitting on its own values; the
+        // chip's presence is the "something here is yours" signal.
+        if defaults.agrees_with(rx) {
+            return;
+        }
+        let same = |a: f32, b: f32| a.to_bits() == b.to_bits();
+        let mut changed: Vec<&str> = Vec::new();
+        if defaults.agc != Some(rx.agc) {
+            changed.push("AGC");
+        }
+        if !defaults.agc_max_gain_db.is_some_and(|v| same(v, rx.agc_max_gain_db)) {
+            changed.push("max gain");
+        }
+        if !defaults.manual_gain_db.is_some_and(|v| same(v, rx.manual_gain_db)) {
+            changed.push("manual gain");
+        }
+        if !defaults.squelch_db.is_some_and(|v| same(v, rx.squelch_db)) {
+            changed.push("squelch");
+        }
+        if defaults.noise_reduction != Some(rx.noise_reduction) {
+            changed.push("noise reduction");
+        }
+        if defaults.auto_notch != Some(rx.auto_notch) {
+            changed.push("auto-notch");
+        }
+        if defaults.wfm_stereo != Some(rx.wfm_stereo) {
+            changed.push("stereo");
+        }
+        if defaults.binaural != Some(rx.binaural) {
+            changed.push("binaural");
+        }
+        if changed.is_empty() {
+            return;
+        }
+        let mode = rx.mode;
+        let hover = format!(
+            "Changed from {}'s defaults: {}.\n\nClick to put them back. \
+             The mode's own values return, and what you set here is forgotten.",
+            mode.label(),
+            changed.join(", ")
+        );
+        if crate::chrome::chip(ui, false, "DEFAULTS").on_hover_text(hover).clicked() {
+            cmds.push(Command::ResetModeDefaults { mode: Some(mode) });
         }
     }
 

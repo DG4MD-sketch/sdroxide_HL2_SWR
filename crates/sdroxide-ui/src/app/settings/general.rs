@@ -454,6 +454,43 @@ impl SdroxideApp {
         }
     }
 
+    /// Forget every mode's remembered settings overrides.
+    ///
+    /// The **DEFAULTS** chip beside the receiver controls puts one mode back;
+    /// this is the way back from a long session of fiddling without walking
+    /// every mode. A command rather than a config edit, so it reaches whichever
+    /// engine is running — local or remote — and undoes itself.
+    pub(in crate::app) fn settings_mode_defaults(
+        &self,
+        ui: &mut egui::Ui,
+        cmds: &mut Vec<sdroxide_types::Command>,
+    ) {
+        ui.label(RichText::new("Per-mode settings").strong());
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            if crate::chrome::chip(ui, false, RichText::new("RESET EVERY MODE").size(10.5))
+                .on_hover_text(
+                    "Forget every mode's remembered AGC, squelch, noise reduction, notch and \
+                     stereo switches, and put each mode's own defaults back.",
+                )
+                .clicked()
+            {
+                cmds.push(sdroxide_types::Command::ResetModeDefaults { mode: None });
+            }
+        });
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(
+                "Selecting a mode lays that mode's own starting values for AGC, squelch, noise \
+                 reduction, the notch and the stereo switches on the receiver, and changing one \
+                 remembers it for that mode alone. The DEFAULTS chip beside the receiver controls \
+                 lists what has been changed and puts the current mode back.",
+            )
+            .size(10.5)
+            .color(crate::theme::gray(140)),
+        );
+    }
+
     /// The user's own speakers / microphone (applied live).
     pub(in crate::app) fn settings_user_audio(
         &self,

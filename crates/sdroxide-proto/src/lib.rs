@@ -1355,7 +1355,13 @@ use sdroxide_types::{
 /// decode the message carrying one. `ServerMsg` gains `Profiles`, the names
 /// to offer, appended last for the same reason: a v152 client handed the list
 /// fails to decode it.
-pub const PROTO_VERSION: u16 = 153;
+/// v154: per-mode settings. The engine applies AGC, squelch, noise reduction
+/// and the rest from a profile when the mode changes, and remembers what the
+/// operator changes while a mode is selected, so `Command` gains
+/// `ResetModeDefaults` — appended, so no surviving discriminant moved. The
+/// profiles themselves travel as receiver state, so a v153 peer's state decode
+/// is unchanged; it just cannot ask for a reset.
+pub const PROTO_VERSION: u16 = 154;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]

@@ -733,6 +733,72 @@ impl Mode {
         }
     }
 
+    /// The starting values for the settings that differ by mode — AGC,
+    /// squelch, noise reduction, the notch and the two stereo switches.
+    ///
+    /// The demodulator already knows the passband it needs; these are the
+    /// settings that are a matter of taste but not the same taste in every
+    /// mode. An operator copying weak SSB wants the noise reduction in and an
+    /// operator watching a waterfall for FT8 wants it out, because on a digital
+    /// signal it eats what little there is and helps nobody.
+    ///
+    /// These are the values a station that has never touched the settings gets,
+    /// and what a per-mode override is laid over; see
+    /// [`crate::ModeProfile`]. Every field is filled in — a default profile is
+    /// the one place a `None` would mean nothing at all.
+    ///
+    /// Kept deliberately conservative:
+    ///
+    /// * **AGC** slow for the weak-signal digital modes, whose whole point is
+    ///   signals near the noise: a fast loop riding the noise *up* works against
+    ///   the decoder. Everything else keeps the stock medium.
+    /// * **Noise reduction off** everywhere, though a little helps a weak voice
+    ///   mode: it is the setting most dependent on the operator's taste, it
+    ///   carries a make-up gain and can add artefacts, and switching modes
+    ///   should not change how loud the radio is. An operator who wants it sets
+    ///   it once per mode and has it remembered.
+    /// * **Squelch open** everywhere — a mode that arrives with the gate shut
+    ///   and no signal yet looks broken. The digital modes have their own
+    ///   [`crate::DigiConfig::digi_squelch`] for this.
+    /// * **Auto-notch off** everywhere. It cancels constant tones, and some of
+    ///   the modes here *are* a constant tone at the audio offset — a CW carrier
+    ///   or an RTTY mark would be notched out of their own passband.
+    ///
+    /// A sub receiver in the same mode gets the same profile; the overrides are
+    /// the station's, not one receiver's.
+    pub fn default_profile(self) -> crate::ModeProfile {
+        // The HF digital modes whose decoders work at the noise floor.
+        let weak_digi = matches!(
+            self,
+            Mode::Ft8
+                | Mode::Ft4
+                | Mode::Ft2
+                | Mode::Js8
+                | Mode::Wspr
+                | Mode::Psk
+                | Mode::Rtty
+                | Mode::Olivia
+                | Mode::Thor
+                | Mode::Fsq
+                | Mode::Hell
+                | Mode::RfPaint
+                | Mode::Packet
+                | Mode::PacketHf
+                | Mode::Navtex
+                | Mode::Wefax
+        );
+        crate::ModeProfile {
+            agc: Some(if weak_digi { AgcMode::Slow } else { AgcMode::Med }),
+            agc_max_gain_db: Some(90.0),
+            manual_gain_db: Some(20.0),
+            squelch_db: Some(crate::SQUELCH_OPEN_DB),
+            noise_reduction: Some(NrLevel::Off),
+            auto_notch: Some(false),
+            wfm_stereo: Some(true),
+            binaural: Some(false),
+        }
+    }
+
     /// Default audio passband edges in Hz relative to the carrier/VFO.
     /// Negative frequencies are below the carrier (LSB side).
     pub fn default_filter(self) -> (f32, f32) {

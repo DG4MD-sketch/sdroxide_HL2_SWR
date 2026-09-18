@@ -2926,6 +2926,16 @@ struct Engine {
     /// working setups, held here so an apply is a memory read rather than
     /// one whenever a radio's dial is clicked.
     profiles: Vec<sdroxide_config::Profile>,
+    /// The operator's per-mode settings overrides (`modeprofiles.json`): what
+    /// AGC, squelch, noise reduction and the rest were changed to while a mode
+    /// was selected, laid over [`sdroxide_types::Mode::default_profile`] and
+    /// applied again the next time that mode comes up. See
+    /// [`sdroxide_types::ModeProfile`].
+    mode_profiles: sdroxide_types::ModeProfiles,
+    /// Whether [`Self::mode_profiles`] has changes the file has not seen yet.
+    /// Flushed on the session tick, like the digi config, because a dragged
+    /// slider is a change per frame and none of them is worth a write.
+    mode_profiles_dirty: bool,
     /// The antenna ports the operator wants, RX and TX: the command line's
     /// choice, else the remembered session's, else whatever they last picked in
     /// the UI. Re-applied whenever a front end is (re)opened, because a
@@ -3705,6 +3715,14 @@ fn engine_thread(
     scan_cfg.forget_stale_skips();
     let stacks = sdroxide_config::load_bandstacks();
     let profiles = sdroxide_config::load_profiles();
+    // Like the session, the per-mode overrides are only read and written by an
+    // engine that was asked to remember its settings. A test or a one-shot
+    // engine must not pick up the operator's file — or leave one behind.
+    let mode_profiles = if engine_cfg.remember_session {
+        engine_cfg.store.load_mode_profiles()
+    } else {
+        sdroxide_types::ModeProfiles::default()
+    };
     let digi_config = sdroxide_config::load_digi_config();
     // Only the per-band drive calibration is kept out of `radio.json` — the
     // engine deliberately does not hold that file (see
@@ -3776,6 +3794,13 @@ fn engine_thread(
         // a transmit frequency.
         state.repeater = s.repeater.clamped();
         state.recording_mono = s.recording_mono;
+    }
+    // The mode's own settings sit on top of the remembered session. The session
+    // is the station's blanket fallback; a mode profile is a statement about
+    // that mode in particular, so it wins — see `Mode::default_profile`.
+    for rx in &mut state.rx {
+        let profile = mode_profiles.effective(rx.mode);
+        profile.apply_to(rx);
     }
     // The command line outranks the remembered session, exactly as it does for
     // the dial and the mode.
@@ -4035,6 +4060,8 @@ fn engine_thread(
         want_decimation,
         store: engine_cfg.store,
         profiles,
+        mode_profiles,
+        mode_profiles_dirty: false,
         instance: engine_cfg.instance,
         primary: engine_cfg.primary,
         tx_gate: engine_cfg.tx_gate,
@@ -4250,6 +4277,10 @@ fn engine_thread(
                     engine.rig_tx = false;
                     engine.cw_gate_until = None;
                     engine.release_tx_gate();
+                    // A change made since the last session tick still has to
+                    // reach the file, or quitting within ten seconds of making
+                    // it forgets it.
+                    engine.flush_mode_profiles();
                     info!("all controllers gone; engine stopping");
                     return;
                 }
@@ -4754,6 +4785,7 @@ fn engine_thread(
             next_session = now + SESSION_SAVE_INTERVAL;
             engine.save_session();
             engine.flush_digi_config();
+            engine.flush_mode_profiles();
         }
     }
 }
@@ -7780,12 +7812,14 @@ impl Engine {
                     c.agc.set_manual_gain_db(manual_db);
                     c.agc.set_mode(agc);
                 }
+                self.remember_mode_setting(rx, |p| p.agc = Some(agc));
             }
             SetAgcMaxGain { rx, db } => {
                 self.state.rx[rx.index()].agc_max_gain_db = db;
                 if let Some(c) = self.chain_mut(rx) {
                     c.agc.set_max_gain_db(db);
                 }
+                self.remember_mode_setting(rx, |p| p.agc_max_gain_db = Some(db));
             }
             SetManualGain { rx, db } => {
                 let db = db.clamp(0.0, sdroxide_types::MAX_MANUAL_GAIN_DB);
@@ -7793,10 +7827,14 @@ impl Engine {
                 if let Some(c) = self.chain_mut(rx) {
                     c.agc.set_manual_gain_db(db);
                 }
+                self.remember_mode_setting(rx, |p| p.manual_gain_db = Some(db));
             }
             SetVolume { rx, v } => self.state.rx[rx.index()].volume = v.clamp(0.0, 1.0),
             SetMute { rx, muted } => self.state.rx[rx.index()].muted = muted,
-            SetSquelch { rx, db } => self.state.rx[rx.index()].squelch_db = db,
+            SetSquelch { rx, db } => {
+                self.state.rx[rx.index()].squelch_db = db;
+                self.remember_mode_setting(rx, |p| p.squelch_db = Some(db));
+            }
             // The rig's own squelch, on a front end that has one. Held in the
             // state either way so the rail keeps its position on a source that
             // is not listening, and passed straight down — the radio is what
@@ -7824,10 +7862,45 @@ impl Engine {
                     level
                 };
                 self.state.rx[rx.index()].noise_reduction = level;
+                self.remember_mode_setting(rx, |p| p.noise_reduction = Some(level));
             }
-            SetAutoNotch { rx, on } => self.state.rx[rx.index()].auto_notch = on,
-            SetWfmStereo { rx, on } => self.state.rx[rx.index()].wfm_stereo = on,
-            SetBinaural { rx, on } => self.state.rx[rx.index()].binaural = on,
+            SetAutoNotch { rx, on } => {
+                self.state.rx[rx.index()].auto_notch = on;
+                self.remember_mode_setting(rx, |p| p.auto_notch = Some(on));
+            }
+            SetWfmStereo { rx, on } => {
+                self.state.rx[rx.index()].wfm_stereo = on;
+                self.remember_mode_setting(rx, |p| p.wfm_stereo = Some(on));
+            }
+            SetBinaural { rx, on } => {
+                self.state.rx[rx.index()].binaural = on;
+                self.remember_mode_setting(rx, |p| p.binaural = Some(on));
+            }
+            // Forget the operator's per-mode values and put the mode's own
+            // defaults back on anything sitting in one of the modes cleared.
+            ResetModeDefaults { mode } => {
+                match mode {
+                    Some(m) => self.mode_profiles.clear(m),
+                    None => self.mode_profiles.clear_all(),
+                }
+                self.mode_profiles_dirty = self.session.is_some();
+                self.flush_mode_profiles();
+                for rx in [RxId::Main, RxId::Sub] {
+                    let live = self.state.rx[rx.index()].mode;
+                    if mode.is_some_and(|m| m != live) {
+                        continue;
+                    }
+                    let profile = self.mode_profiles.effective(live);
+                    let r = &mut self.state.rx[rx.index()];
+                    profile.apply_to(r);
+                    let (agc, max_gain, manual) = (r.agc, r.agc_max_gain_db, r.manual_gain_db);
+                    if let Some(c) = self.chain_mut(rx) {
+                        c.agc.set_mode(agc);
+                        c.agc.set_max_gain_db(max_gain);
+                        c.agc.set_manual_gain_db(manual);
+                    }
+                }
+            }
             // Main receiver only, like the status it answers: the DRM panel
             // shows the broadcast being listened to.
             SetDrmService { service } => {
@@ -12347,6 +12420,41 @@ impl Engine {
         }
     }
 
+    /// Remember a per-mode settings change the operator just made.
+    ///
+    /// The value goes into the override for the receiver's *current* mode, and
+    /// is then trimmed against that mode's defaults: a setting put back where
+    /// the mode starts is forgotten rather than stored as a preference, which
+    /// is also what makes an override with nothing left in it removable.
+    ///
+    /// Written out on the session tick rather than on the change. These are a
+    /// handful of bytes and the operator makes them one at a time, except when
+    /// a slider is being dragged — a change per frame, none of which is worth a
+    /// write. An engine started without `remember_session` (a test, a one-shot)
+    /// keeps them for the run and writes nothing.
+    fn remember_mode_setting(
+        &mut self,
+        rx: RxId,
+        update: impl FnOnce(&mut sdroxide_types::ModeProfile),
+    ) {
+        let mode = self.state.rx[rx.index()].mode;
+        let default = mode.default_profile();
+        let mut over = self.mode_profiles.overrides(mode).unwrap_or_default();
+        update(&mut over);
+        over.trim_against(&default);
+        self.mode_profiles.set(mode, over);
+        self.mode_profiles_dirty = self.session.is_some();
+    }
+
+    fn flush_mode_profiles(&mut self) {
+        if !std::mem::take(&mut self.mode_profiles_dirty) {
+            return;
+        }
+        if let Err(e) = self.store.save_mode_profiles(&self.mode_profiles) {
+            warn!("saving the per-mode settings (modeprofiles.json): {e}");
+        }
+    }
+
     fn set_rx_mode(&mut self, rx: RxId, mode: Mode) {
         // APRS is a channel, not a band, and which channel is a property of
         // the operator's region: 144.800 in Region 1, 144.390 in the Americas,
@@ -12465,8 +12573,17 @@ impl Engine {
             RxId::Main => self.state.rx_freq_hz(),
             RxId::Sub => self.state.sub_rx_hz,
         };
+        // The profile to lay on, decided before the borrow below. Only on a real
+        // change: `set_rx_mode` also runs when a rig reports the mode it is
+        // already in, and a profile re-applied then would overwrite the tweak
+        // the operator just made.
+        let profile = (self.state.rx[rx.index()].mode != mode)
+            .then(|| self.mode_profiles.effective(mode));
         let r = &mut self.state.rx[rx.index()];
         r.mode = mode;
+        if let Some(profile) = profile {
+            profile.apply_to(r);
+        }
         let (lo, hi) = mode.default_filter_at(dial);
         (r.filter_lo, r.filter_hi) = (lo, hi);
         let snapshot = *r;
