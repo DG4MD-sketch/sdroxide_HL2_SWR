@@ -263,12 +263,17 @@ struct LabelSlot {
     area: Rect,
     must: bool,
     rank: u8,
+    /// Settles a tie in rank: the MMSI. The tracker hands vessels over in hash
+    /// map order, so breaking ties by position would let which of two
+    /// neighbours keeps its name change whenever the map is rehashed.
+    key: u32,
 }
 
 /// How hard a vessel's name fights for room on a crowded chart: lower wins.
 ///
 /// The order is what a port watch would read first — a distress call, then a
-/// SOLAS ship, then anything actually under way, then the marks.
+/// SOLAS ship, then any other craft (a Class B yacht, a SAR aircraft, a
+/// lifeboat — by kind, so one tied up in a marina counts), then the marks.
 fn label_rank(v: &AisVessel) -> u8 {
     if v.is_alarm() {
         0
@@ -291,7 +296,7 @@ fn label_rank(v: &AisVessel) -> u8 {
 /// view (issue #408).
 fn label_plan(slots: &[LabelSlot], bounds: Rect) -> Vec<usize> {
     let mut order: Vec<usize> = (0..slots.len()).collect();
-    order.sort_by_key(|&i| (!slots[i].must, slots[i].rank, i));
+    order.sort_by_key(|&i| (!slots[i].must, slots[i].rank, slots[i].key));
     let mut placed: Vec<Rect> = Vec::new();
     let mut out: Vec<usize> = Vec::new();
     for i in order {
@@ -460,8 +465,8 @@ pub fn show(
     // ── the names ──
     // Laid out first, then placed greedily: the selected and hovered always,
     // the rest by how much they matter — a distress call, then a SOLAS ship,
-    // then anything under way — each only if its name misses what is already on
-    // the chart. A busy approach channel then keeps the names that say the
+    // then any other craft, then the marks — each only if its name misses what
+    // is already on the chart. A busy approach channel then keeps the names that say the
     // most, rather than losing every one of them at once the moment a few
     // dozen vessels are in view (issue #408).
     //
@@ -505,7 +510,7 @@ pub fn show(
             drawn.push((at, galley, colour));
         }
         let Some(area) = area else { continue };
-        slots.push(LabelSlot { area: area.expand(1.0), must, rank: label_rank(v) });
+        slots.push(LabelSlot { area: area.expand(1.0), must, rank: label_rank(v), key: v.mmsi });
         pending.push(PendingLabel {
             tick: (c + vec2(r * 0.6, -r * 0.6), anchor),
             tint,
@@ -680,7 +685,7 @@ mod tests {
     }
 
     fn slot(x: f32, y: f32, must: bool, rank: u8) -> LabelSlot {
-        LabelSlot { area: Rect::from_min_size(pos2(x, y), vec2(20.0, 8.0)), must, rank }
+        LabelSlot { area: Rect::from_min_size(pos2(x, y), vec2(20.0, 8.0)), must, rank, key: 0 }
     }
 
     /// A chart too busy for every name keeps the ones that say the most, by
@@ -696,6 +701,17 @@ mod tests {
         let slots = vec![slot(0.0, 0.0, false, 3), slot(40.0, 0.0, false, 1)];
         let plan = label_plan(&slots, bounds);
         assert!(plan.contains(&0) && plan.contains(&1), "both should fit: {plan:?}");
+    }
+
+    /// Two names of the same rank after the same room: the lower MMSI wins,
+    /// whichever order the tracker happened to list them in.
+    #[test]
+    fn a_tie_in_rank_goes_to_the_lower_mmsi_not_the_list_order() {
+        let bounds = Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 100.0));
+        let a = || LabelSlot { key: 244_000_002, ..slot(0.0, 0.0, false, 1) };
+        let b = || LabelSlot { key: 244_000_001, ..slot(0.0, 0.0, false, 1) };
+        assert_eq!(label_plan(&[a(), b()], bounds), vec![1]);
+        assert_eq!(label_plan(&[b(), a()], bounds), vec![0]);
     }
 
     /// The name the operator picked or is pointing at is placed first and drawn
