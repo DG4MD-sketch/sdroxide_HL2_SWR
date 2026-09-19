@@ -13,7 +13,7 @@
 //! nothing to keep in step.
 
 use eframe::egui::{self, Color32, RichText};
-use sdroxide_types::{Command, CwEngine};
+use sdroxide_types::{Command, CwEngine, KeyChord};
 
 use crate::app::{SdroxideApp, tx_gated};
 use crate::theme::ThemedScroll;
@@ -316,19 +316,22 @@ impl SdroxideApp {
         ui.add_space(gap);
 
         // The keyboard as a straight key (issue #322): with the mode on, the
-        // Space bar is the key — down while held, up on release — and the
-        // box above is locked out so a stray space does not type into it.
+        // key bound to `Action::CwStraight` — Space by default, any key the
+        // operator chooses in Settings → Controls — is the key, down while
+        // held and up on release, and the box above is locked out so a stray
+        // press does not type into it.
         //
         // Only on the radio holding the keyboard. In a split view every
-        // visible radio draws this panel, and without the gate one Space bar
-        // would key each of them that has the mode on — and put the key back
-        // down on a radio the frame after losing focus had lifted it.
+        // visible radio draws this panel, and without the gate one key would
+        // key each of them that has the mode on — and put the key back down on
+        // a radio the frame after losing focus had lifted it.
+        let straight_chords = self.input.cw_straight_chords();
         if self.cw_straight && tx_ok && self.focused {
             // The key is the operator's only when nothing on screen holds the
             // keyboard: a caret in some other field is a typist, not a keyer.
             let free =
                 !ui.memory(|m| m.focused().is_some()) && !ui.ctx().egui_wants_keyboard_input();
-            let down = free && ui.input(|i| i.key_down(egui::Key::Space));
+            let down = free && ui.input(|i| straight_key_held(i, &straight_chords));
             if down != self.cw_key_down {
                 self.cw_key_down = down;
                 cmds.push(Command::CwKey(down));
@@ -358,10 +361,11 @@ impl SdroxideApp {
                     RichText::new(if on { " KEY ● " } else { " KEY " }).size(12.0).strong(),
                 )
                 .on_hover_text(
-                    "Hold the Space bar as a straight key — down while it is held, up on \
-                     release — instead of typing text. The transmit box is locked while it \
-                     is on, and the whole keyer is handed to the key: whatever text was \
-                     queued is dropped.\n\n\
+                    "Hold the key bound to CW straight key — Space by default, and any key \
+                     you like in Settings → Controls — as a straight key: down while it is \
+                     held, up on release, instead of typing text. The transmit box is locked \
+                     while it is on, and the whole keyer is handed to the key: whatever text \
+                     was queued is dropped.\n\n\
                      An SDR keys this through its own transmit chain; a rig that keys \
                      itself from text has nothing for a hand key to drive, so the mode \
                      does not engage there.",
@@ -448,6 +452,24 @@ impl SdroxideApp {
             // sending controls rather than the decoder chips in the header,
             // because what it changes is what the TX button and the box do.
             crate::chrome::row_tail(ui, |ui| {
+                // Local sidetone, for a station that has no other way to hear
+                // its own sending: on `Sound card (MCW)` the keyed tone goes to
+                // the rig and stops there.
+                let sidetone = self.digi_cfg_edit.cw_sidetone;
+                if crate::chrome::chip(ui, sidetone, RichText::new("SIDETONE").size(10.5))
+                    .on_hover_text(
+                        "Play the keyed tone through this computer's speakers as well as \
+                         sending it, so you hear what you are sending. On `Sound card \
+                         (MCW)` the tone goes out to the rig and nowhere else, so without \
+                         this you send in silence. Off where the rig's own monitor or an \
+                         off-air copy already does the job.",
+                    )
+                    .clicked()
+                    && self.digi_cfg_seeded
+                {
+                    self.digi_cfg_edit.cw_sidetone = !sidetone;
+                    cmds.push(Command::SetDigiConfig(self.digi_cfg_edit.clone()));
+                }
                 self.send_on_return_chip(
                     ui,
                     cmds,
@@ -462,17 +484,17 @@ impl SdroxideApp {
         ui.add_space(bottom_pad);
     }
 
-    /// Take the Space bar away from everything else while it is the straight
+    /// Take the straight-key chord away from everything else while it is the
     /// key (issue #322).
     ///
     /// Called ahead of `control_inputs`, because the key bindings are polled
     /// before any panel draws: swallowing the press in the panel came a frame
-    /// section too late, and a PTT bound to Space — the Controls tab offers it
-    /// in one click — keyed a carrier under the operator's hand as well. Only
-    /// the *events* go. egui keeps which keys are held apart from them, and that
-    /// is what the panel reads the key from.
+    /// section too late, and something bound to the same key — a PTT, the
+    /// Controls tab offers it in one click — keyed or acted under the
+    /// operator's hand as well. Only the *events* go. egui keeps which keys are
+    /// held apart from them, and that is what the panel reads the key from.
     ///
-    /// Nothing is taken while a widget holds the keyboard: a space there is
+    /// Nothing is taken while a widget holds the keyboard: a press there is
     /// text, the straight key is not reading it, and the bindings stand down on
     /// their own.
     pub(in crate::app) fn swallow_straight_key(&self, ctx: &egui::Context) {
@@ -482,7 +504,8 @@ impl SdroxideApp {
         if ctx.egui_wants_keyboard_input() || ctx.memory(|m| m.focused()).is_some() {
             return;
         }
-        ctx.input_mut(|i| i.events.retain(|e| !is_straight_key_event(e)));
+        let chords = self.input.cw_straight_chords();
+        ctx.input_mut(|i| i.events.retain(|e| !is_straight_key_event(e, &chords)));
     }
 
     /// The operator's own message buttons, and the chip that edits them.
@@ -809,22 +832,78 @@ impl SdroxideApp {
             changed = true;
         }
 
+        // How long transmit is held after the last character or key release.
+        // Five seconds bridges a typist's pauses; shorter is snappier on a
+        // straight key, and 0 drops transmit as soon as nothing is left to
+        // send.
+        let idle = cfg.cw_tx_idle_s;
+        let face = if idle <= 0.0 { "IDLE 0".to_string() } else { format!("IDLE {idle:.0}s") };
+        let btn = crate::chrome::chip(ui, false, RichText::new(face).size(10.5)).on_hover_text(
+            "How long transmit is held after the last character, or after the straight \
+             key is let go, before the carrier drops. Longer bridges a slow typist's \
+             pauses; shorter gets off the frequency sooner; Off drops it as soon as \
+             everything queued has gone out.",
+        );
+        let mut pick_idle = None;
+        let resp = egui::Popup::from_toggle_button_response(&btn)
+            .frame(crate::chrome::window_frame())
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+            .show(|ui| {
+                crate::chrome::window_body_bg(ui);
+                ui.set_max_width(170.0);
+                for s in [0.0f32, 1.0, 2.0, 3.0, 5.0, 8.0, 10.0] {
+                    let lbl = if s == 0.0 {
+                        "Off — drop at once".to_string()
+                    } else {
+                        format!("{s:.0} s")
+                    };
+                    if ui.selectable_label((idle - s).abs() < 0.01, lbl).clicked() {
+                        pick_idle = Some(s);
+                    }
+                }
+            });
+        if let Some(r) = &resp {
+            crate::chrome::paint_popup_cut_border(ui.ctx(), &r.response, 1.0);
+        }
+        if let Some(s) = pick_idle {
+            cfg.cw_tx_idle_s = s;
+            changed = true;
+        }
+
         if changed && self.digi_cfg_seeded {
             cmds.push(Command::SetDigiConfig(self.digi_cfg_edit.clone()));
         }
     }
 }
 
-/// A Space press — auto-repeat included — or the space it types: what the
-/// straight key keeps from the rest of the screen while it is engaged. The
-/// release is left alone; a binding holds nothing it never saw pressed, so it
-/// reaches nothing.
-fn is_straight_key_event(e: &egui::Event) -> bool {
-    match e {
-        egui::Event::Key { key: egui::Key::Space, pressed: true, .. } => true,
-        egui::Event::Text(t) => t == " ",
-        _ => false,
-    }
+/// True while any bound straight-key chord is held, modifiers and all.
+fn straight_key_held(i: &egui::InputState, chords: &[KeyChord]) -> bool {
+    chords.iter().any(|c| chord_held(i, c))
+}
+
+/// Whether one chord's key is down with exactly its modifiers.
+fn chord_held(i: &egui::InputState, c: &KeyChord) -> bool {
+    let Some(key) = egui::Key::from_name(&c.key) else { return false };
+    i.key_down(key)
+        && i.modifiers.ctrl == c.ctrl
+        && i.modifiers.shift == c.shift
+        && i.modifiers.alt == c.alt
+}
+
+/// A straight-key press — auto-repeat included — that the straight key keeps
+/// from the rest of the screen while it is engaged. The release is left alone;
+/// a binding holds nothing it never saw pressed, so it reaches nothing.
+///
+/// The typed character is not matched: with no widget focused egui does nothing
+/// with a `Text` event, and when one *is* focused nothing here runs at all.
+fn is_straight_key_event(e: &egui::Event, chords: &[KeyChord]) -> bool {
+    let egui::Event::Key { key, pressed: true, modifiers, .. } = e else { return false };
+    chords.iter().any(|c| {
+        egui::Key::from_name(&c.key) == Some(*key)
+            && modifiers.ctrl == c.ctrl
+            && modifiers.shift == c.shift
+            && modifiers.alt == c.alt
+    })
 }
 
 #[cfg(test)]
@@ -841,8 +920,22 @@ mod tests {
         }
     }
 
+    fn key(k: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key: k,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn space_chord() -> Vec<KeyChord> {
+        vec![KeyChord::plain("Space")]
+    }
+
     /// The press goes and the key stays down: a binding polled after the swallow
-    /// never sees Space pressed, and the straight key still reads it held.
+    /// never sees the key pressed, and the straight key still reads it held.
     #[test]
     fn swallowing_the_press_leaves_the_key_held() {
         let ctx = egui::Context::default();
@@ -851,29 +944,33 @@ mod tests {
             ..Default::default()
         };
         let mut out = ctx.run_ui(raw, |ui| {
-            ui.ctx().input_mut(|i| i.events.retain(|e| !is_straight_key_event(e)));
+            let chords = space_chord();
+            ui.ctx().input_mut(|i| i.events.retain(|e| !is_straight_key_event(e, &chords)));
             ui.input(|i| {
                 assert!(!i.key_pressed(egui::Key::Space), "a binding would still fire");
                 assert!(i.key_down(egui::Key::Space), "the straight key lost its key");
-                assert!(i.events.is_empty(), "the typed space survived: {:?}", i.events);
+                assert!(
+                    i.events.iter().all(|e| !matches!(e, egui::Event::Key { .. })),
+                    "the key press survived: {:?}",
+                    i.events
+                );
             });
         });
         // No renderer here to take the font atlas the first frame builds.
         out.textures_delta.clear();
     }
 
-    /// Only Space is taken. Every other key, the release, and text that merely
-    /// contains a space all pass.
+    /// Only the bound key is taken. The release, other keys, and text pass.
     #[test]
-    fn nothing_but_the_space_press_is_taken() {
-        assert!(!is_straight_key_event(&space(false)));
-        assert!(!is_straight_key_event(&egui::Event::Text("a b".into())));
-        assert!(!is_straight_key_event(&egui::Event::Key {
-            key: egui::Key::Enter,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: egui::Modifiers::NONE,
-        }));
+    fn nothing_but_the_bound_press_is_taken() {
+        let chords = space_chord();
+        assert!(!is_straight_key_event(&space(false), &chords));
+        assert!(!is_straight_key_event(&egui::Event::Text("a b".into()), &chords));
+        assert!(!is_straight_key_event(&key(egui::Key::Enter), &chords));
+        // A second binding works the same way, and the default no longer
+        // assumes Space.
+        let c = vec![KeyChord::plain("Backslash")];
+        assert!(is_straight_key_event(&key(egui::Key::Backslash), &c));
+        assert!(!is_straight_key_event(&space(true), &c));
     }
 }

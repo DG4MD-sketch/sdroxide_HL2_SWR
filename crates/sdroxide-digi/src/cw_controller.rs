@@ -51,13 +51,6 @@ const OUT_RATE: f64 = 48_000.0;
 const RX_TEXT_CAP: usize = 8000;
 /// Sidetone samples generated per fill iteration.
 const TX_CHUNK: usize = 400;
-/// Drop out of transmit after this long with nothing left to send.
-///
-/// Holding the key down between characters is what makes typing feel like
-/// sending, but "between characters" has to end somewhere: a transmitter left
-/// keyed on an empty buffer holds the frequency, and the operator who wandered
-/// off is exactly the one not watching for it.
-const TX_IDLE_S: f32 = 5.0;
 /// The longest a straight key may be held without a key-up (issue #322).
 ///
 /// A hand does not hold a key for half a minute, so a key still down after
@@ -463,10 +456,11 @@ impl CwController {
         // the rig has finished keying it, rather than waiting out a typist who
         // was never going to type.
         let committed_over_done = self.cfg.send_on_enter && self.over_had_text;
+        let idle_s = self.cfg.cw_tx_idle_s.max(0.0);
         let waited = self.cat.as_ref().is_some_and(|c| {
             c.last_input
                 .and_then(|t| now.duration_since(t).ok())
-                .is_some_and(|d| d.as_secs_f32() >= TX_IDLE_S)
+                .is_some_and(|d| idle_s == 0.0 || d.as_secs_f32() >= idle_s)
         });
         if self.tx_active && empty && (committed_over_done || waited) {
             self.over_had_text = false;
@@ -647,7 +641,8 @@ impl DigiEngine for CwController {
                 self.status_dirty = true;
             }
             self.idle_samples += out.len();
-            if self.idle_samples as f32 > TX_IDLE_S * OUT_RATE as f32 {
+            let idle_s = self.cfg.cw_tx_idle_s.max(0.0);
+            if idle_s == 0.0 || self.idle_samples as f32 > idle_s * OUT_RATE as f32 {
                 self.tx_active = false;
                 self.status_dirty = true;
             }
@@ -906,6 +901,10 @@ impl DigiEngine for CwController {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The default idle hang — `DigiConfig::cw_tx_idle_s`'s default — which the
+    /// timing tests below are written against.
+    const TX_IDLE_S: f32 = 5.0;
 
     fn cfg() -> DigiConfig {
         DigiConfig { my_call: "W1AW".into(), cw_wpm: 25.0, ..Default::default() }
@@ -1395,11 +1394,37 @@ mod tests {
         assert!(!c.status().tx_next);
     }
 
+    /// The transmit-hold after the last character is the operator's to set
+    /// (issue #495): five seconds on an empty frequency is a long time.
+    #[test]
+    fn the_transmit_hold_is_configurable() {
+        let mut c = CwController::new(
+            DigiConfig { send_on_enter: false, cw_tx_idle_s: 1.0, ..cfg() },
+            48_000.0,
+            None,
+        );
+        c.set_tx_text("E".into());
+        c.set_tx_active(true);
+        c.poll(SystemTime::now(), 14_030_000.0);
+
+        let mut blk = [0.0f32; 480];
+        let mut blocks = 0;
+        while !c.fill_tx_block(&mut blk) {
+            blocks += 1;
+            assert!(blocks < 2000, "transmit never released the key");
+        }
+        let held_s = blocks as f32 * 480.0 / OUT_RATE as f32;
+        assert!(
+            held_s < TX_IDLE_S * 0.5,
+            "a 1 s hold should release well before the 5 s default, held {held_s:.1} s"
+        );
+        assert!(!c.status().tx_next);
+    }
+
     /// Nothing goes out until the operator says to transmit — the panel's TX
     /// button means the same thing on both routes.
     #[test]
-    fn text_typed_out_of_transmit_waits() {
-        let mut c = CwController::new(cfg(), 48_000.0, Some(50));
+    fn text_typed_out_of_transmit_waits() {        let mut c = CwController::new(cfg(), 48_000.0, Some(50));
         let t0 = SystemTime::now();
         c.set_tx_text("CQ DE W1AW ".into());
         assert!(keyed(&c.poll(t0 + Duration::from_secs(1), 0.0)).is_empty());

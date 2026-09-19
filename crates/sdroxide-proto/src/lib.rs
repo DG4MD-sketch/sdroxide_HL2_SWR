@@ -1379,7 +1379,16 @@ use sdroxide_types::{
 /// fields by position: a v155 peer reads the extra bytes as the start of
 /// whatever follows the state, and fails to decode `HelloAck` and every state
 /// update.
-pub const PROTO_VERSION: u16 = 156;
+/// v157: two CW conveniences from the same report (issue #495).
+/// `DigiConfig::cw_sidetone` plays the keyed tone through the local speakers so
+/// a `Sound card (MCW)` operator hears what they are sending, and
+/// `DigiConfig::cw_tx_idle_s` makes the transmit-hold after the last character
+/// or key release configurable. Both appended to `DigiConfig`'s tail, and
+/// `DigiConfig` rides `Command::SetDigiConfig` and `DigiStatus` whole, so a
+/// v156 peer reads the extra bytes as the start of the next field and fails to
+/// decode every digital status.
+pub const PROTO_VERSION: u16 = 157;
+
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]

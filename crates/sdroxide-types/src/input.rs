@@ -75,6 +75,12 @@ pub enum Action {
     MemoryRecall(u32),
     RecordToggle,
     AbortTx,
+    /// Hold the bound key as a CW straight key (issue #322). The *key* is the
+    /// binding; the CW panel reads it held rather than the input runtime
+    /// dispatching it, because a straight key is a held state and not a
+    /// press/release pair the runtime can see through the panel's own focus
+    /// rules. Only takes effect while the CW panel's KEY toggle is armed.
+    CwStraight,
     /// Transmit voice-keyer slot `n` (0-based). Does nothing when the slot is
     /// empty, which is what makes the shipped numpad bindings safe.
     VoicePlay(u8),
@@ -146,7 +152,7 @@ impl Action {
             | Mute | NoiseBlanker | NoiseReductionCycle | AutoNotch | Binaural | AgcCycle
             | SubRx | ModeNext | ModePrev | ModeSelect(_) | RecordToggle => "Receive",
             Ptt | TuneCarrier | TxDrive | TuneDrive | MicGain | DigiAudioFreq | AbortTx
-            | VoicePlay(_) | VoiceStop | ToneBurst => "Transmit",
+            | CwStraight | VoicePlay(_) | VoiceStop | ToneBurst => "Transmit",
             SpectrumZoom | SpectrumPan | SpectrumFloorDb | SpectrumCeilDb | FitSpan | ZoomIn
             | ZoomOut | PeakHold | SpectrumCollapse | WaterfallCollapse | WaterfallFlip => {
                 "Display"
@@ -201,6 +207,7 @@ impl Action {
             ModePrev => "Mode previous",
             RecordToggle => "Record on/off",
             AbortTx => "Abort transmit",
+            CwStraight => "CW straight key",
             VoiceStop => "Voice keyer stop",
             ToneBurst => "1750 Hz tone burst",
             FitSpan => "Fit span",
@@ -293,7 +300,7 @@ impl Action {
         v.extend(Band::ALL.iter().map(|b| BandSelect(*b)));
         v.extend([ModeNext, ModePrev]);
         v.extend(Mode::ALL.iter().map(|m| ModeSelect(*m)));
-        v.extend([RecordToggle, AbortTx, VoiceStop, ToneBurst]);
+        v.extend([RecordToggle, AbortTx, CwStraight, VoiceStop, ToneBurst]);
         v.extend((0..crate::VOICE_SLOTS as u8).map(VoicePlay));
         v.extend([
             FitSpan,
@@ -495,6 +502,20 @@ impl KeyBinding {
         }
     }
 
+    /// A momentary binding — hold to act, release to stop. Used by the CW
+    /// straight key, which is the one binding whose *held* state matters rather
+    /// than its edges.
+    fn momentary(chord: KeyChord, action: Action) -> Self {
+        KeyBinding {
+            chord,
+            action,
+            value: 1.0,
+            tuning: BindingTuning::with_step(action.default_step()),
+            button: ButtonMode::Momentary,
+            enabled: true,
+        }
+    }
+
     /// The shipped defaults. These reproduce the shortcuts sdroxide had before
     /// bindings were configurable, so an operator who never opens the editor
     /// sees no change.
@@ -521,6 +542,11 @@ impl KeyBinding {
             KeyBinding::toggle(KeyChord::plain("N"), Action::NoiseBlanker),
             KeyBinding::toggle(KeyChord::plain("F"), Action::FitSpan),
             KeyBinding::toggle(KeyChord::plain("V"), Action::WaterfallFlip),
+            // The CW straight key keeps its historical Space bar, now as a
+            // binding so any key can be chosen instead (the space bar's travel
+            // is long for keying). Only armed by the CW panel's KEY toggle, so
+            // it types a space everywhere else.
+            KeyBinding::momentary(KeyChord::plain("Space"), Action::CwStraight),
         ];
         // Numpad 1–9 then 0 play slots 1–10; numpad "−" stops a message early.
         for slot in 0..crate::VOICE_SLOTS as u8 {
