@@ -83,6 +83,11 @@ const IF_TX_FLAG: usize = 26;
 const IF_BODY_LEN: usize = 35;
 
 pub struct TrUsdx {
+    /// Whether the audio rides the CAT link (`TrUsdxAudio::OneCable`) rather
+    /// than a sound card. Everything the profile does differently between the
+    /// two modes hangs off this one flag: only the in-band mode streams, and
+    /// only the in-band mode must send no polls.
+    one_cable: bool,
     /// Bytes arrived and not yet split into whole CAT frames.
     buf: Vec<u8>,
     /// Whether the receive audio stream is running — true between the `US`
@@ -107,8 +112,11 @@ pub struct TrUsdx {
 }
 
 impl TrUsdx {
-    pub fn new() -> Self {
+    /// `one_cable` is [`sdroxide_types::TrUsdxAudio::OneCable`] — audio inside
+    /// the CAT stream rather than over a sound card.
+    pub fn new(one_cable: bool) -> Self {
         TrUsdx {
+            one_cable,
             buf: Vec::new(),
             in_audio: false,
             audio: Vec::new(),
@@ -139,7 +147,7 @@ impl TrUsdx {
 
 impl Default for TrUsdx {
     fn default() -> Self {
-        Self::new()
+        Self::new(true)
     }
 }
 
@@ -229,35 +237,36 @@ impl Protocol for TrUsdx {
         if on { b"TX;".to_vec() } else { b"RX;".to_vec() }
     }
 
-    /// Nothing. This is the heart of how this family is driven, and it is the
-    /// opposite of every other profile here.
+    /// The dial and the mode — but only when the audio is on a sound card.
     ///
-    /// The firmware cannot take a CAT command while its audio stream is
-    /// running: writing one *into* the stream does not pause it, it kills it,
-    /// and the stream does not come back — measured on the bench, a single
-    /// `FA;` mid-stream took the rate from ~6 kB/s to zero and the radio stayed
-    /// silent until it was stopped and re-enabled by hand. So a poll, which is
-    /// a CAT command every half-second for the whole session, would leave a
-    /// radio that streams for a moment and then never again.
+    /// In the in-band mode (`TrUsdxAudio::OneCable`) this is **nothing**, and
+    /// that is the heart of how that mode is driven. The firmware cannot take a
+    /// CAT command while its audio stream is running: writing one *into* the
+    /// stream does not pause it, it kills it, and the stream does not come back
+    /// — measured on the bench, a single `FA;` mid-stream took the rate from
+    /// ~6 kB/s to zero and the radio stayed silent until it was stopped and
+    /// re-enabled by hand. So a poll there, which is a CAT command every
+    /// half-second for the whole session, would leave a radio that streams for a
+    /// moment and then never again. Control frames only go out when the operator
+    /// asks for something, each bracketed with the stream's pause and resume
+    /// (see [`Protocol::stream_pause`]), and the cost is that the radio's own
+    /// knob and mode are not followed.
     ///
-    /// The serial thread therefore asks for nothing on its own here. Control
-    /// frames only go out when the operator asks for something, and each is
-    /// bracketed with the stream's own pause and resume (see
-    /// `Protocol::stream_pause`). The cost is that the radio's front-panel knob
-    /// and mode are not followed: there is no read to follow them with. The
-    /// operator drives the dial from sdroxide, which is the premise of the
-    /// interface anyway.
+    /// With the audio on a sound card there is no stream to protect, so the poll
+    /// is an ordinary one and the rig's own controls are followed like any other
+    /// CAT rig's.
     fn poll_requests(&self) -> Vec<Vec<u8>> {
-        Vec::new()
+        if self.one_cable { Vec::new() } else { vec![b"FA;".to_vec(), b"MD;".to_vec()] }
     }
 
     fn dial_requests(&self) -> Vec<Vec<u8>> {
-        Vec::new()
+        if self.one_cable { Vec::new() } else { vec![b"FA;".to_vec()] }
     }
 
-    /// No transmit-state read either: `IF;` mid-stream is the same poison.
+    /// The transmit-state read, sound-card mode only: `IF;` mid-stream is the
+    /// same poison the poll is.
     fn tx_state_requests(&self) -> Vec<Vec<u8>> {
-        Vec::new()
+        if self.one_cable { Vec::new() } else { vec![b"IF;".to_vec()] }
     }
 
     /// Suspend the stream before a control command is written. The firmware
@@ -271,14 +280,18 @@ impl Protocol for TrUsdx {
         b"UA1;".to_vec()
     }
 
-    /// Stop any auto-information the radio may have been left in. Streaming is
-    /// deliberately **not** enabled here: the opening sequence has other frames
-    /// after this one (`clear_offsets`'s `RC;`), and a CAT frame written once
-    /// the stream is running kills it. The enable goes out last, from
-    /// [`Self::stream_start`], on the serial thread's retry — by which time no
-    /// other frame is owed.
+    /// Stop any auto-information the radio may have been left in, and switch off
+    /// the in-band audio stream in case a previous session — or one of the
+    /// community streaming drivers — left it running, which would pour audio
+    /// bytes into a parser expecting `;`-framed replies.
+    ///
+    /// In the in-band mode the *enable* is deliberately not here: the opening
+    /// sequence has other frames after this (`clear_offsets`'s `RC;`), and a CAT
+    /// command written once the stream is running kills it, so the enable goes
+    /// out last from [`Self::stream_start`] on the serial thread's retry, by
+    /// which time no other frame is owed.
     fn open_requests(&self) -> Vec<Vec<u8>> {
-        vec![b"AI0;".to_vec()]
+        vec![b"AI0;".to_vec(), b"UA0;".to_vec()]
     }
 
     /// Clear the clarifier and switch RIT/XIT off. sdroxide carries RIT on the
@@ -309,9 +322,9 @@ impl Protocol for TrUsdx {
 
     /// Whether this profile carries audio inside the byte stream, so the serial
     /// thread routes bytes to [`Self::take_stream_audio`] rather than to a sound
-    /// card.
+    /// card. True only in the in-band mode.
     fn streams_audio(&self) -> bool {
-        true
+        self.one_cable
     }
 
     /// Stop the stream and start it again — deliberately, and never `UA1;`
@@ -453,7 +466,7 @@ mod tests {
 
     #[test]
     fn the_frames_are_the_documented_shape() {
-        let mut p = TrUsdx::new();
+        let mut p = TrUsdx::new(true);
         assert_eq!(p.set_freq(14_031_000.0), b"FA00014031000;".to_vec());
         assert_eq!(p.set_mode(Mode::Usb), b"MD2;".to_vec());
         assert_eq!(p.set_mode(Mode::Cw), b"MD3;".to_vec());
@@ -465,7 +478,7 @@ mod tests {
 
     #[test]
     fn only_the_commands_the_firmware_answers_are_claimed() {
-        let mut p = TrUsdx::new();
+        let mut p = TrUsdx::new(true);
         // No meters, no power, no filter, no squelch, no keyer.
         assert!(p.tx_telemetry_requests().is_empty());
         assert!(p.rx_telemetry_requests().is_empty());
@@ -486,7 +499,7 @@ mod tests {
     /// while the stream is idle.
     #[test]
     fn the_stream_is_enabled_after_the_opening_frames_not_during_them() {
-        let p = TrUsdx::new();
+        let p = TrUsdx::new(true);
         let open: Vec<String> =
             p.open_requests().iter().map(|f| String::from_utf8_lossy(f).into_owned()).collect();
         assert!(!open.iter().any(|f| f.contains("UA1")), "the enable must not open: {open:?}");
@@ -495,11 +508,33 @@ mod tests {
         assert_eq!(p.stream_start(), b"UA0;UA1;".to_vec());
         assert_eq!(p.stream_pause(), b"UA0;".to_vec());
         assert_eq!(p.stream_resume(), b"UA1;".to_vec());
+        // The in-band mode asks for nothing of its own — a poll would kill the
+        // stream — and it asserts `UA0;` at open all the same, to clear any
+        // stream a previous session left running.
+        assert!(p.poll_requests().is_empty());
+        assert!(p.dial_requests().is_empty());
+        assert!(p.tx_state_requests().is_empty());
+    }
+
+    /// The other half of the choice: with the audio on a sound card there is no
+    /// stream to protect, so the profile polls like any other CAT rig and the
+    /// serial thread sets up no in-band rings at all.
+    #[test]
+    fn sound_card_mode_polls_and_does_not_stream() {
+        let p = TrUsdx::new(false);
+        assert!(!p.streams_audio());
+        assert_eq!(p.poll_requests(), vec![b"FA;".to_vec(), b"MD;".to_vec()]);
+        assert_eq!(p.dial_requests(), vec![b"FA;".to_vec()]);
+        assert_eq!(p.tx_state_requests(), vec![b"IF;".to_vec()]);
+        // Both modes still switch any leftover stream off at open.
+        let open: Vec<String> =
+            p.open_requests().iter().map(|f| String::from_utf8_lossy(f).into_owned()).collect();
+        assert!(open.contains(&"UA0;".to_string()), "{open:?}");
     }
 
     #[test]
     fn a_frequency_and_mode_reply_are_read() {
-        let mut p = TrUsdx::new();
+        let mut p = TrUsdx::new(true);
         assert_eq!(feed(&mut p, b";FA00014031000;"), vec![CatUpdate::Freq(14_031_000.0)]);
         assert_eq!(feed(&mut p, b";MD3;"), vec![CatUpdate::Mode(Mode::Cw)]);
     }
@@ -507,7 +542,7 @@ mod tests {
     /// The transmit flag, out of the bench radio's own `IF;` reply.
     #[test]
     fn the_transmit_flag_comes_out_of_if_by_position() {
-        let mut p = TrUsdx::new();
+        let mut p = TrUsdx::new(true);
         assert_eq!(
             feed(&mut p, b";IF0001403100000000+000000000030000000;"),
             vec![CatUpdate::Ptt(false)]
@@ -529,7 +564,7 @@ mod tests {
     /// the audio.
     #[test]
     fn audio_and_a_cat_reply_are_told_apart_in_one_stream() {
-        let mut p = TrUsdx::new();
+        let mut p = TrUsdx::new(true);
         // The stream always starts with the `US` that `UA1;` is answered with.
         let mut stream = b"US".to_vec();
         stream.extend_from_slice(&[0x80, 0x81, 0x82]);
@@ -547,7 +582,7 @@ mod tests {
     /// stream is a sample of 59 and not a stray byte.
     #[test]
     fn the_receive_escape_is_undone() {
-        let mut p = TrUsdx::new();
+        let mut p = TrUsdx::new(true);
         feed(&mut p, b"US");
         feed(&mut p, &[0x3C, 0x40, 0x3C]);
         let mut audio = Vec::new();
@@ -558,7 +593,7 @@ mod tests {
     /// And the same substitution the other way on transmit.
     #[test]
     fn the_transmit_escape_is_applied() {
-        let p = TrUsdx::new();
+        let p = TrUsdx::new(true);
         // A sample that lands on 0x3B (59) must go out as 0x3C.
         let mut out = Vec::new();
         p.encode_tx_audio(&[(59.0 - 128.0) / 127.0], &mut out);
@@ -569,7 +604,7 @@ mod tests {
     /// it is not lost.
     #[test]
     fn a_reply_split_across_reads_is_still_one_reply() {
-        let mut p = TrUsdx::new();
+        let mut p = TrUsdx::new(true);
         feed(&mut p, b"US");
         assert!(feed(&mut p, &[0x80, 0x81]).is_empty());
         assert!(feed(&mut p, b";FA0001403").is_empty());

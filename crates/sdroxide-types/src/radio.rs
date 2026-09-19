@@ -935,6 +935,45 @@ impl Default for SerialConfig {
     }
 }
 
+/// How a (tr)uSDX's audio reaches sdroxide.
+///
+/// The radio has no sound card of its own and two ways to be listened to, and
+/// which one is right is a fact about the operator's shack rather than about
+/// the radio: one is a single USB cable, the other a sound card on the 3.5 mm
+/// jack. So it is a setting, and this is it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum TrUsdxAudio {
+    /// Receive and transmit audio carried *inside* the CAT serial link as the
+    /// firmware's own 8-bit stream — one USB cable and nothing else.
+    ///
+    /// The catch is the firmware: it cannot take a CAT command while its stream
+    /// is running, so this mode sends no polls, and the radio's own dial and
+    /// mode are not followed.
+    #[default]
+    OneCable,
+    /// Audio from an external USB sound card wired to the radio's 3.5 mm
+    /// speaker/mic jack. Control still goes over the serial port, and the rig
+    /// is polled and behaves as any other CAT rig.
+    SoundCard,
+}
+
+impl TrUsdxAudio {
+    pub const ALL: [TrUsdxAudio; 2] = [TrUsdxAudio::OneCable, TrUsdxAudio::SoundCard];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TrUsdxAudio::OneCable => "One cable (audio in the CAT stream)",
+            TrUsdxAudio::SoundCard => "USB sound card (3.5 mm jack)",
+        }
+    }
+
+    /// Whether this mode carries the audio in the CAT link, which the serial
+    /// thread and the source both branch on.
+    pub fn streams_audio(self) -> bool {
+        self == TrUsdxAudio::OneCable
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CatConfig {
@@ -1121,6 +1160,10 @@ pub struct CatConfig {
     /// there it also puts the scope into centre mode so it follows the dial.
     #[serde(default)]
     pub scope_span: IcomScopeSpan,
+    /// How a (tr)uSDX's audio reaches this end — see [`TrUsdxAudio`]. Ignored
+    /// by every other family, which have no such choice to make.
+    #[serde(default)]
+    pub trusdx_audio: TrUsdxAudio,
 }
 
 /// The slowest CI-V link the scope sweeps fit down. A sweep is ~500 bytes of
@@ -1265,6 +1308,7 @@ impl Default for CatConfig {
             audio_bw_hz: 4000.0,
             scope: false,
             scope_span: IcomScopeSpan::default(),
+            trusdx_audio: TrUsdxAudio::default(),
         }
     }
 }

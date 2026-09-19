@@ -181,7 +181,7 @@ pub(in crate::app) fn settings_cat_tab(
         CAT_SCOPE_MIN_BAUD, CatFamily, CwKeying, DigiMode, Direction, ELAD_CAT_BAUDS,
         ELAD_DEFAULT_CAT_BAUD, EladAntenna, EladTxInput, IcomModel, IcomScopeSpan, KenwoodSend,
         LineState, ModeControl, Parity, PttMethod, QMX_IQ_OFFSET_HZ, QMX_IQ_RATE_HZ,
-        RS_HFIQ_CAT_BAUD, SoundFormat, StopBits,
+        RS_HFIQ_CAT_BAUD, SoundFormat, StopBits, TrUsdxAudio,
     };
     let Some(cfg) = radio_edit.as_mut() else {
         ui.label("Waiting for the configuration of the machine the radio is attached to.");
@@ -839,26 +839,34 @@ pub(in crate::app) fn settings_cat_tab(
             );
             ui.end_row();
 
-            ui.label("");
-            ui.label(RichText::new("Audio and control share the USB cable — no sound card").weak())
-                .on_hover_text(
-                    "A (tr)uSDX has no sound card. Receive and transmit audio are \
-                     8-bit streams carried inside the CAT serial link at the radio's \
-                     own rates (~7812 samples/s in, 11520 out), which this profile \
-                     drives directly through the same USB cable the control uses.\n\n\
-                     The firmware cannot take a CAT command while its audio stream is \
-                     running — a command sent into the stream does not pause it, it \
-                     kills it — so this profile never polls. Tuning and mode changes \
-                     are sent as you make them, each pausing the stream for a moment \
-                     and starting it again; expect a brief gap in the audio on each \
-                     change. Nothing is sent while you are simply listening.\n\n\
-                     Two consequences. The radio's own dial and mode are not followed \
-                     — there is no read to follow them with — so drive it from here. \
-                     And opening the port resets the radio (the serial adapter's DTR \
-                     is wired to its reset), so the first second or two after \
-                     connecting is quiet while it boots; DTR is held high for the \
-                     whole session and never used to key.",
-                );
+            ui.label("Audio").on_hover_text(
+                "A (tr)uSDX has no sound card of its own and two ways to be heard, \
+                 and which is right is a fact about your shack rather than the radio.\n\n\
+                 \"One cable\" takes the audio inside the CAT serial link itself — the \
+                 radio's own 8-bit stream, over the same USB cable as the control, with \
+                 nothing else to plug in. The catch is the firmware: it cannot take a \
+                 CAT command while its stream is running (a command sent into the stream \
+                 does not pause it, it kills it), so this mode never polls. Tuning and \
+                 mode changes are sent as you make them, each pausing the stream for a \
+                 moment and starting it again, so expect a brief gap on each change; \
+                 nothing is sent while you are simply listening. The radio's own dial \
+                 and mode are not followed either — there is no read to follow them \
+                 with — so drive it from here.\n\n\
+                 \"USB sound card\" takes the audio from an external sound card wired to \
+                 the radio's 3.5 mm speaker/mic jack, and behaves as any other CAT rig: \
+                 the dial poll runs, so the radio's own knob and mode are followed. Pick \
+                 the card under Radio audio below.\n\n\
+                 Both modes open the port with DTR held high: the serial adapter's DTR \
+                 is wired to the radio's reset, so opening the port reboots it and the \
+                 first second or two is quiet while it comes up. DTR is never used to key.",
+            );
+            enum_combo(
+                ui,
+                "trusdx_audio",
+                &mut cfg.cat.trusdx_audio,
+                &TrUsdxAudio::ALL,
+                TrUsdxAudio::label,
+            );
             ui.end_row();
         }
 
