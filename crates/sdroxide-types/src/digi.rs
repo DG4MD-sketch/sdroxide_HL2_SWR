@@ -551,7 +551,7 @@ pub struct QsoLive {
 }
 
 /// Live state of the CW decoder.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct CwStatus {
     /// The decoder is copying: its timing fit is good and holding steady.
     pub locked: bool,
@@ -563,6 +563,11 @@ pub struct CwStatus {
     /// The tone actually being copied, in Hz above the dial — the operator's
     /// pitch plus whatever the decoder's AFC has pulled to stay on the signal.
     pub tone_hz: f32,
+    /// What the straight key decoded of *our own* sending, so the operator can
+    /// see the characters their hand produced. Empty in every other mode and
+    /// whenever the key has not been used.
+    #[serde(default)]
+    pub sent_text: String,
 }
 
 /// Live state of the RADE V1 modem.

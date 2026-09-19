@@ -49,6 +49,9 @@ const CW_RATE: f64 = 8000.0;
 const OUT_RATE: f64 = 48_000.0;
 /// Cap on the rolling receive text.
 const RX_TEXT_CAP: usize = 8000;
+/// Cap on the straight key's own decoded text, so a long session's keying
+/// cannot grow without bound. Long enough to read back a whole exchange.
+const SENT_TEXT_CAP: usize = 2000;
 /// Sidetone samples generated per fill iteration.
 const TX_CHUNK: usize = 400;
 /// The longest a straight key may be held without a key-up (issue #322).
@@ -222,6 +225,15 @@ pub struct CwController {
     deep_failed: bool,
     tuner: Tuner,
     deep_scratch: Vec<f32>,
+    /// A second decoder, fed our *own* sidetone so the operator can read back
+    /// what the straight key sends — the receive decoder deliberately ignores
+    /// our sending, so this is the only way the hand gets a character readout
+    /// the way the text keyer's box gives the typist one. Speed-locked to our
+    /// own WPM, which is known, so it copies a clean self-made tone with no
+    /// hunt.
+    sent_rx: CwRx,
+    sent_rs: Option<MonoResampler>,
+    sent_text: String,
 
     // TX
     tx: CwTx,
@@ -275,6 +287,10 @@ impl CwController {
         let pitch = cfg.cw_pitch_hz;
         let mut rx = CwRx::new(CW_RATE, pitch);
         rx.set_speed_lock(cfg.cw_speed_lock.then_some(cfg.cw_wpm));
+        // The straight key's read-back decoder: locked to our own speed, since
+        // our own sending needs no speed search.
+        let mut sent_rx = CwRx::new(CW_RATE, pitch);
+        sent_rx.set_speed_lock(Some(cfg.cw_wpm));
         // Built only when it is the engine the operator asked for: it is a
         // neural model to load and hold, and a station set to the timing
         // decoder should not be paying for one it will never run.
@@ -298,6 +314,9 @@ impl CwController {
             deep_failed,
             tuner: Tuner::new(tap_rate, pitch as f64),
             deep_scratch: Vec::new(),
+            sent_rx,
+            sent_rs: MonoResampler::new(tap_rate, CW_RATE),
+            sent_text: String::new(),
             tx: CwTx::new(CW_RATE, pitch as f64, cfg.cw_wpm),
             tx_rs: MonoResampler::new(CW_RATE, OUT_RATE),
             tx48: VecDeque::new(),
@@ -475,6 +494,7 @@ impl CwController {
             wpm: self.rx.wpm(),
             snr_db: self.rx.snr_db(),
             tone_hz: self.rx.tone_hz(),
+            sent_text: self.sent_text.clone(),
         }
     }
 
@@ -546,13 +566,33 @@ impl DigiEngine for CwController {
     }
 
     fn on_rx_audio(&mut self, tap: &[f32]) {
-        // Our own sidetone is not a signal to copy. Full break-in would let the
-        // decoder read the other station between our own elements, but the tap
-        // carries what we are sending, not what they are, so reading it would
-        // only echo us back onto the panel. A rig keying itself from text we
+        // Our own sidetone is not a signal for the *receive* decoder to copy:
+        // full break-in would let it read the other station between our own
+        // elements, but the tap carries what we are sending, so reading it
+        // would only echo us onto the panel. A rig keying itself from text we
         // handed it is doing exactly that too, and its sidetone comes back down
         // the same audio path.
+        //
+        // The straight key's read-back decoder is the exception, and the whole
+        // point of it: the operator hand-keyed without typing anything, so this
+        // is the only place their characters can appear (issue #495 follow-up).
         if self.on_air(SystemTime::now()) {
+            if self.straight {
+                self.scratch.clear();
+                match &mut self.sent_rs {
+                    Some(r) => r.push(tap, &mut self.scratch),
+                    None => self.scratch.extend_from_slice(tap),
+                }
+                let text = self.sent_rx.process(&self.scratch);
+                if !text.is_empty() {
+                    self.sent_text.push_str(&text);
+                    if self.sent_text.len() > SENT_TEXT_CAP {
+                        let cut = self.sent_text.len() - SENT_TEXT_CAP;
+                        self.sent_text.drain(..cut);
+                    }
+                    self.status_dirty = true;
+                }
+            }
             return;
         }
         self.scratch.clear();
@@ -863,6 +903,12 @@ impl DigiEngine for CwController {
         self.tx_watchdog = false;
         self.tx.set_manual(on);
         self.tx.set_held(false);
+        // A fresh key session starts its read-back blank, so what is on screen
+        // is what this hand has sent rather than the last session's.
+        if on {
+            self.sent_text.clear();
+            self.sent_rx.reset();
+        }
         self.status_dirty = true;
     }
 
@@ -1183,6 +1229,59 @@ mod tests {
             }
         }
         assert!(c.rx_text.is_empty(), "copied itself: {:?}", c.rx_text);
+    }
+
+    /// The straight key *does* decode its own sending — the read-back the text
+    /// keyer gives a typist (issue #495 follow-up). The receive pane still must
+    /// not fill with it, so the two decoders are separate.
+    #[test]
+    fn the_straight_key_decodes_its_own_sending() {
+        let mut c = CwController::new(cfg(), 48_000.0, None);
+        c.set_straight(true);
+        c.poll(SystemTime::now(), 14_030_000.0);
+
+        // One unit of keying at the configured speed: a dit is 1 unit, the
+        // inter-character gap 3.
+        let unit_ms = 1200.0 / c.cfg.cw_wpm;
+        c.key_down(true);
+        // The engine's next poll is what marks us on the air; only then does
+        // the tap carry our sidetone and the read-back decoder run.
+        c.poll(SystemTime::now(), 14_030_000.0);
+        let mut peak = 0.0f32;
+        let mut feed = |c: &mut CwController, ms: f32, peak: &mut f32| {
+            let mut blk = [0.0f32; 480];
+            for _ in 0..(ms / 10.0).round().max(0.0) as usize {
+                c.fill_tx_block(&mut blk);
+                for s in blk {
+                    *peak = peak.max(s.abs());
+                }
+                // The engine loops the transmitted sidetone back through the tap.
+                c.on_rx_audio(&blk);
+            }
+        };
+        // Key T E S T by hand — T(3) gap3 E(1) gap3 S(1 gap1 1 gap1 1) gap3
+        // T(3) — then a settling gap. The decoder's window is 1.2 s before it
+        // says anything at all, so the feed is longer than that. The read-back
+        // need not be letter-perfect: this is hand-approximated timing, and the
+        // assertion below only claims the character readout is working, not
+        // that a synthetic fist is a good one.
+        for (on, off) in [(3u32, 3u32), (1, 3), (1, 1), (1, 1), (1, 3), (3, 30)] {
+            c.key_down(true);
+            feed(&mut c, unit_ms * on as f32, &mut peak);
+            c.key_down(false);
+            feed(&mut c, unit_ms * off as f32, &mut peak);
+        }
+        let got = c.sent_text.replace(' ', "");
+        assert!(
+            got.len() >= 3 && got.contains('T') && got.contains('E'),
+            "read back {:?}",
+            c.sent_text
+        );
+        assert!(c.rx_text.is_empty(), "the receive pane copied our keying: {:?}", c.rx_text);
+        // A fresh key session starts the read-back blank.
+        c.set_straight(false);
+        c.set_straight(true);
+        assert!(c.sent_text.is_empty());
     }
 
     // ── sending from a radio that keys itself ───────────────────────────────

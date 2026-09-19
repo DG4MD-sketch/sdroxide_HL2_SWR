@@ -30,7 +30,7 @@ impl SdroxideApp {
     ) {
         let content_bottom = ui.cursor().top() + panel_h - 40.0;
         let status = self.digi_status.clone();
-        let cw = status.as_ref().and_then(|s| s.cw).unwrap_or_default();
+        let cw = status.as_ref().and_then(|s| s.cw.clone()).unwrap_or_default();
         let pitch = status.as_ref().map(|s| s.audio_hz).unwrap_or(700.0);
         let sent = status.as_ref().map(|s| s.tx_sent).unwrap_or(0);
         let tx_on = status.as_ref().map(|s| s.tx_next).unwrap_or(false);
@@ -251,8 +251,20 @@ impl SdroxideApp {
         let entered =
             tx_ok && !self.cw_straight && send_on_enter && crate::chrome::take_return(ui, tx_id);
 
+        // With the straight key engaged the box is the *text* keyer's and is
+        // not typed into; in its place the operator gets what their keying
+        // decoded to, the readout the typist gets from the box (issue #495
+        // follow-up).
+        let straight = self.cw_straight;
+        let sent_text = self
+            .digi_status
+            .as_ref()
+            .and_then(|s| s.cw.as_ref())
+            .map(|c| c.sent_text.clone())
+            .unwrap_or_default();
+
         let resp = ui
-            .add_enabled_ui(tx_ok && !self.cw_straight, |ui| {
+            .add_enabled_ui(tx_ok, |ui| {
                 ui.allocate_ui(egui::vec2(ui.available_width(), input_h), |ui| {
                     egui::Frame::new()
                         .fill(crate::theme::ROW_BG())
@@ -267,19 +279,37 @@ impl SdroxideApp {
                                 .auto_shrink([false, false])
                                 .stick_to_bottom(true)
                                 .show_themed(ui, |ui| {
-                                    crate::chrome::field(
-                                        ui,
-                                        egui::TextEdit::multiline(&mut self.text_tx)
-                                            .id(tx_id)
-                                            .layouter(&mut layouter)
-                                            .frame(egui::Frame::NONE)
-                                            .desired_width(f32::INFINITY)
-                                            .hint_text(if send_on_enter {
-                                                "Type a line, Return sends it…"
-                                            } else {
-                                                "Type here to send…"
-                                            }),
-                                    )
+                                    if straight {
+                                        let (text, color) = if sent_text.is_empty() {
+                                            (
+                                                "Key to send — the characters you send appear here."
+                                                    .to_string(),
+                                                crate::theme::gray(120),
+                                            )
+                                        } else {
+                                            (sent_text.clone(), crate::theme::GREEN())
+                                        };
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(text).monospace().size(13.0).color(color),
+                                            )
+                                            .wrap(),
+                                        )
+                                    } else {
+                                        crate::chrome::field(
+                                            ui,
+                                            egui::TextEdit::multiline(&mut self.text_tx)
+                                                .id(tx_id)
+                                                .layouter(&mut layouter)
+                                                .frame(egui::Frame::NONE)
+                                                .desired_width(f32::INFINITY)
+                                                .hint_text(if send_on_enter {
+                                                    "Type a line, Return sends it…"
+                                                } else {
+                                                    "Type here to send…"
+                                                }),
+                                        )
+                                    }
                                 })
                                 .inner
                         })
