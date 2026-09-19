@@ -315,7 +315,7 @@ impl CwController {
             tuner: Tuner::new(tap_rate, pitch as f64),
             deep_scratch: Vec::new(),
             sent_rx,
-            sent_rs: MonoResampler::new(tap_rate, CW_RATE),
+            sent_rs: MonoResampler::new(OUT_RATE, CW_RATE),
             sent_text: String::new(),
             tx: CwTx::new(CW_RATE, pitch as f64, cfg.cw_wpm),
             tx_rs: MonoResampler::new(CW_RATE, OUT_RATE),
@@ -558,6 +558,32 @@ impl CwController {
             qso: None,
         }
     }
+
+    /// Decode the tone the straight key is putting out, so its operator sees
+    /// the characters they sent where a typist sees the text box. Fed the
+    /// transmit block itself rather than the receive tap: the tap is the
+    /// receiver's audio and never carries the sidetone we only play locally —
+    /// which is why the first cut of this read back nothing on a real rig
+    /// (issue #495 follow-up).
+    fn feed_sent_decode(&mut self, block: &[f32]) {
+        if !self.straight {
+            return;
+        }
+        self.scratch.clear();
+        match &mut self.sent_rs {
+            Some(r) => r.push(block, &mut self.scratch),
+            None => self.scratch.extend_from_slice(block),
+        }
+        let text = self.sent_rx.process(&self.scratch);
+        if !text.is_empty() {
+            self.sent_text.push_str(&text);
+            if self.sent_text.len() > SENT_TEXT_CAP {
+                let cut = self.sent_text.len() - SENT_TEXT_CAP;
+                self.sent_text.drain(..cut);
+            }
+            self.status_dirty = true;
+        }
+    }
 }
 
 impl DigiEngine for CwController {
@@ -573,26 +599,12 @@ impl DigiEngine for CwController {
         // handed it is doing exactly that too, and its sidetone comes back down
         // the same audio path.
         //
-        // The straight key's read-back decoder is the exception, and the whole
-        // point of it: the operator hand-keyed without typing anything, so this
-        // is the only place their characters can appear (issue #495 follow-up).
+        // The straight key's read-back does not read here. The tap is the
+        // *receiver's* audio, and our sidetone never appears on it — the
+        // engine hands the keyed tone to the speakers, not back down the
+        // receive path — so the read-back is fed the transmit block itself in
+        // `fill_tx_block` (issue #495 follow-up).
         if self.on_air(SystemTime::now()) {
-            if self.straight {
-                self.scratch.clear();
-                match &mut self.sent_rs {
-                    Some(r) => r.push(tap, &mut self.scratch),
-                    None => self.scratch.extend_from_slice(tap),
-                }
-                let text = self.sent_rx.process(&self.scratch);
-                if !text.is_empty() {
-                    self.sent_text.push_str(&text);
-                    if self.sent_text.len() > SENT_TEXT_CAP {
-                        let cut = self.sent_text.len() - SENT_TEXT_CAP;
-                        self.sent_text.drain(..cut);
-                    }
-                    self.status_dirty = true;
-                }
-            }
             return;
         }
         self.scratch.clear();
@@ -709,6 +721,7 @@ impl DigiEngine for CwController {
                 self.straight_held_samples = 0;
             }
             self.tx.next_manual_block(out, OUT_RATE);
+            self.feed_sent_decode(out);
         } else {
             while self.tx48.len() < out.len() && self.producing() {
                 self.scratch.clear();
@@ -1244,8 +1257,7 @@ mod tests {
         // inter-character gap 3.
         let unit_ms = 1200.0 / c.cfg.cw_wpm;
         c.key_down(true);
-        // The engine's next poll is what marks us on the air; only then does
-        // the tap carry our sidetone and the read-back decoder run.
+        // The engine's next poll is what marks us on the air.
         c.poll(SystemTime::now(), 14_030_000.0);
         let mut peak = 0.0f32;
         let mut feed = |c: &mut CwController, ms: f32, peak: &mut f32| {
@@ -1255,7 +1267,10 @@ mod tests {
                 for s in blk {
                     *peak = peak.max(s.abs());
                 }
-                // The engine loops the transmitted sidetone back through the tap.
+                // The engine plays the keyed sidetone to the speakers; the
+                // receive tap carries the receiver, not us. Feed it anyway so
+                // the assertion below still pins that the read-back does not
+                // leak into the receive pane.
                 c.on_rx_audio(&blk);
             }
         };
