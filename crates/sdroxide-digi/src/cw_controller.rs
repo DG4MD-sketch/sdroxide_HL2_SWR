@@ -36,7 +36,7 @@ use std::collections::VecDeque;
 use std::time::SystemTime;
 
 use sdroxide_deepcw::{Tuner, Worker};
-use sdroxide_dsp::{CwRx, CwTx, MonoResampler};
+use sdroxide_dsp::{CwRx, CwSelfRx, CwTx, MonoResampler};
 use sdroxide_types::{CwEngine, CwStatus, DigiConfig, DigiStatus, Mode, QsoStep, TranscriptLine};
 
 use crate::DigiEngine;
@@ -231,7 +231,7 @@ pub struct CwController {
     /// the way the text keyer's box gives the typist one. Speed-locked to our
     /// own WPM, which is known, so it copies a clean self-made tone with no
     /// hunt.
-    sent_rx: CwRx,
+    sent_rx: CwSelfRx,
     sent_rs: Option<MonoResampler>,
     sent_text: String,
 
@@ -287,10 +287,13 @@ impl CwController {
         let pitch = cfg.cw_pitch_hz;
         let mut rx = CwRx::new(CW_RATE, pitch);
         rx.set_speed_lock(cfg.cw_speed_lock.then_some(cfg.cw_wpm));
-        // The straight key's read-back decoder: locked to our own speed, since
-        // our own sending needs no speed search.
-        let mut sent_rx = CwRx::new(CW_RATE, pitch);
-        sent_rx.set_speed_lock(Some(cfg.cw_wpm));
+        // The straight key's read-back decoder. It reads the tone we are
+        // generating ourselves, so it does not need the classic decoder's
+        // six-second window and three-second catch-up — those make the read-back
+        // lag the hand and swallow characters — but a small, immediate decoder
+        // that measures each element as it goes out and prints a character the
+        // moment its gap shows (issue #495 follow-up).
+        let sent_rx = CwSelfRx::new(CW_RATE, cfg.cw_wpm);
         // Built only when it is the engine the operator asked for: it is a
         // neural model to load and hold, and a station set to the timing
         // decoder should not be paying for one it will never run.
@@ -920,7 +923,7 @@ impl DigiEngine for CwController {
         // is what this hand has sent rather than the last session's.
         if on {
             self.sent_text.clear();
-            self.sent_rx.reset();
+            self.sent_rx.reset(self.cfg.cw_wpm);
         }
         self.status_dirty = true;
     }
@@ -950,9 +953,14 @@ impl DigiEngine for CwController {
 
     /// The unsettled tail goes with the settled text: it is on the same page,
     /// and leaving it behind would clear the window to a stray half-word.
+    /// A straight key's read-back is on the same page too, and it is the same
+    /// gesture — the CLEAR RX chip says "the decode windows are clean", so the
+    /// read-back goes with them rather than lingering from the last over.
     fn clear_rx(&mut self) {
         self.rx_text.clear();
         self.rx_pending.clear();
+        self.sent_text.clear();
+        self.sent_rx.reset(self.cfg.cw_wpm);
         self.status_dirty = true;
     }
 }
@@ -1299,8 +1307,51 @@ mod tests {
         assert!(c.sent_text.is_empty());
     }
 
-    // ── sending from a radio that keys itself ───────────────────────────────
+    /// The read-back follows the operator's fist, not the panel's decode
+    /// speed: keyed here at 18 WPM with element jitter while the panel's speed
+    /// is its default, and every character still comes back. This is what the
+    /// classic decoder could not do — its six-second window and three-second
+    /// catch-up swallowed all but a stray space (issue #495 follow-up).
+    #[test]
+    fn the_read_back_follows_the_operator_s_fist() {
+        let mut c = CwController::new(cfg(), 48_000.0, None);
+        c.set_straight(true);
+        c.poll(SystemTime::now(), 14_030_000.0);
+        let unit_ms = 1200.0 / 18.0;
+        let jit = [0.85f32, 1.1, 0.95, 1.05, 0.9, 1.15, 1.0, 0.8, 1.2, 0.92, 1.08, 0.97];
+        let seq: &[(u32, u32)] = &[
+            (1, 1), (3, 1), (3, 1), (1, 3), // P .-.
+            (1, 1), (3, 3), // A .-
+            (1, 1), (3, 1), (1, 3), // R .-.
+            (1, 1), (1, 3), // I ..
+            (1, 1), (1, 1), (1, 20), // S ...
+        ];
+        let mut ji = 0usize;
+        let mut peak = 0.0f32;
+        let mut feed = |c: &mut CwController, ms: f32, peak: &mut f32| {
+            let mut blk = [0.0f32; 480];
+            for _ in 0..(ms / 10.0).round().max(0.0) as usize {
+                c.fill_tx_block(&mut blk);
+                for s in blk {
+                    *peak = peak.max(s.abs());
+                }
+                c.on_rx_audio(&blk);
+            }
+        };
+        for &(on, off) in seq {
+            c.key_down(true);
+            feed(&mut c, unit_ms * on as f32 * jit[ji % jit.len()], &mut peak);
+            ji += 1;
+            c.key_down(false);
+            feed(&mut c, unit_ms * off as f32 * jit[ji % jit.len()], &mut peak);
+            ji += 1;
+        }
+        let got = c.sent_text.replace(' ', "");
+        assert_eq!(got, "PARIS", "read back {:?}", c.sent_text);
+        assert!(c.rx_text.is_empty(), "the receive pane copied our keying: {:?}", c.rx_text);
+    }
 
+    // ── sending from a radio that keys itself ───────────────────────────────
     use std::time::Duration;
 
     /// The text handed to the radio by a round of polling.
