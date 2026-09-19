@@ -137,7 +137,7 @@ impl SdroxideApp {
                     ui.add_space(6.0);
                 }
                 self.cw_speed_controls(ui, cmds);
-                self.clear_rx_chip(ui, cmds);
+                self.clear_chip_with_readback(ui, cmds);
             });
         });
         ui.add_space(4.0);
@@ -743,6 +743,40 @@ impl SdroxideApp {
             cmds.push(Command::SetDigiConfig(self.digi_cfg_edit.clone()));
         }
         self.cw_macro_edit = open;
+    }
+
+    /// [`crate::app::panels::clear_rx_chip`] is not enough for this panel: the
+    /// receive pane and the straight key's read-back both redraw from the
+    /// engine's status echo, and a click's empty status lands a frame or two
+    /// after the click. The read-back sits where the operator is looking, so
+    /// the box is emptied here, on the click itself, and the command keeps the
+    /// engine's copy in step. The typed text in the text keyer's box is not a
+    /// decode and is left alone.
+    fn clear_chip_with_readback(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<Command>) {
+        let resp = crate::chrome::chip_accent_enabled(
+            ui,
+            true,
+            false,
+            " CLEAR RX ",
+            Some(10.5),
+            crate::theme::CYAN(),
+            crate::theme::INK_ON_CYAN(),
+        );
+        if resp
+            .on_hover_text(
+                "Empty the receive window and the straight key's read-back. \
+                 Nothing that is on the air stops.",
+            )
+            .clicked()
+        {
+            if let Some(s) = self.digi_status.as_mut() {
+                s.text_rx.clear();
+                if let Some(cw) = s.cw.as_mut() {
+                    cw.sent_text.clear();
+                }
+            }
+            cmds.push(Command::DigiClearRx);
+        }
     }
 
     /// Transmit speed, Farnsworth spacing, and whether the decoder is allowed to

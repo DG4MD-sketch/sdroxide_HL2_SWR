@@ -1349,6 +1349,15 @@ mod tests {
         let got = c.sent_text.replace(' ', "");
         assert_eq!(got, "PARIS", "read back {:?}", c.sent_text);
         assert!(c.rx_text.is_empty(), "the receive pane copied our keying: {:?}", c.rx_text);
+
+        // CLEAR RX clears the read-back with the receive window, and the wipe
+        // sticks: no tail is still cached in the decoder to trickle out while
+        // the operator is not keying.
+        c.clear_rx();
+        assert!(c.sent_text.is_empty(), "read-back not cleared: {:?}", c.sent_text);
+        assert!(c.status().cw.as_ref().unwrap().sent_text.is_empty());
+        feed(&mut c, unit_ms * 30.0, &mut peak);
+        assert!(c.sent_text.is_empty(), "read-back came back on its own: {:?}", c.sent_text);
     }
 
     // ── sending from a radio that keys itself ───────────────────────────────
