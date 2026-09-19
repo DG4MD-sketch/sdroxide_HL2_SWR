@@ -416,10 +416,38 @@ pub enum CatFamily {
     /// Appended after [`CatFamily::QrpLabs`] for the reason [`CatFamily::Flrig`]
     /// gives.
     RsHfiq,
+    /// The (tr)uSDX — DL2MAN/PE1NNZ's pocket QRP transceiver, and the open
+    /// uSDX firmware it grew from.
+    ///
+    /// A fourth Kenwood dialect: the radio emulates a TS-480 and answers
+    /// `ID;` with `020`, but the subset is thin — dial, mode, PTT, RIT/XIT,
+    /// VOX and AF gain, and nothing else. No S-meter, no SWR, no power control,
+    /// no VFO B, no split, no keyer: every one of those reads earns a `?;`.
+    /// Driving it as a Kenwood is therefore not merely imprecise but noisy, so
+    /// it gets a profile that asks only what this firmware answers.
+    ///
+    /// What makes it a family rather than a Kenwood note is the audio. There is
+    /// **no sound card**: receive audio and transmit audio are 8-bit streams
+    /// carried *inside the CAT serial link*, switched on with the firmware's
+    /// own `UA` command. That framing — audio bytes running until a `;`, then a
+    /// CAT frame, then a `US` that resumes the stream — is unlike anything else
+    /// on this link, and no other family's driver could be asked to carry it.
+    ///
+    /// Two hardware facts shape the driver and are asserted rather than
+    /// configured. Opening the port may reset the radio (the CH340's DTR is
+    /// wired to it on the common board), and toggling DTR resets it again — so
+    /// DTR is pinned high for the whole session and offered as nothing at all.
+    /// And the radio ignores CAT while it is transmitting, so the poll must
+    /// stand down for the length of an over; a frame written into the stream
+    /// there is a splice in the transmitted audio, not a reading.
+    ///
+    /// Appended after [`CatFamily::RsHfiq`] for the reason [`CatFamily::Flrig`]
+    /// gives.
+    TrUsdx,
 }
 
 impl CatFamily {
-    pub const ALL: [CatFamily; 10] = [
+    pub const ALL: [CatFamily; 11] = [
         CatFamily::Xiegu,
         CatFamily::Icom,
         CatFamily::Yaesu,
@@ -428,6 +456,7 @@ impl CatFamily {
         CatFamily::Elad,
         CatFamily::QrpLabs,
         CatFamily::RsHfiq,
+        CatFamily::TrUsdx,
         CatFamily::Rigctld,
         CatFamily::Flrig,
     ];
@@ -447,6 +476,7 @@ impl CatFamily {
             CatFamily::Elad => "ELAD",
             CatFamily::QrpLabs => "QRP Labs",
             CatFamily::RsHfiq => "RS-HFIQ",
+            CatFamily::TrUsdx => "(tr)uSDX",
             CatFamily::Rigctld => "Hamlib rigctld (network)",
             CatFamily::Flrig => "flrig (network)",
         }
@@ -1149,6 +1179,27 @@ pub const QMX_IQ_RATE_HZ: u32 = 48_000;
 /// selecting the family fills this in and `sdroxide_cat::spawn` pins it
 /// (issue #383).
 pub const RS_HFIQ_CAT_BAUD: u32 = 57_600;
+
+/// The rate a (tr)uSDX sends receive audio at, over its CAT link's own `US`
+/// stream, in samples per second.
+///
+/// The published figures disagree — DL2MAN's page says 7825, community drivers
+/// use 7820, and the firmware's own comment says 4812 — so this is the one
+/// number here that was *measured* rather than read: on the bench radio
+/// (firmware 2.x, CH340 board) 93 761 bytes arrived in 12.002 s, or 7812.3 B/s.
+/// The firmware computes the rate from a timer, so 7812.5 is the nominal value
+/// and the small deficit is the host's own read jitter.
+///
+/// The exact figure matters less than it looks: the samples are resampled to
+/// the engine's rate on the way in, and a rate off by a fraction of a percent
+/// is a fraction of a percent of pitch, not a broken link. It matters at all
+/// because the resampler needs a number, and the wrong one drifts.
+pub const TRUSDX_RX_RATE_HZ: u32 = 7812;
+
+/// The rate a (tr)uSDX takes transmit audio at, over the same link. Unlike the
+/// receive side the firmware gives this one plainly ("11520 Hz"), and the host
+/// paces the bytes out at it — the radio does not clock them.
+pub const TRUSDX_TX_RATE_HZ: u32 = 11_520;
 
 /// Whether a rig's I/Q is corrected unless the operator says otherwise. On:
 /// see [`CatConfig::iq_correction`].
@@ -7481,13 +7532,16 @@ mod tests {
     /// disappears from the dialog instead of failing to build.
     #[test]
     fn every_cat_family_is_offered_and_labelled() {
-        assert_eq!(CatFamily::ALL.len(), 10);
+        assert_eq!(CatFamily::ALL.len(), 11);
         for f in CatFamily::ALL {
             assert!(!f.label().is_empty(), "{f:?}");
         }
         assert!(CatFamily::ALL.contains(&CatFamily::Elad));
         assert!(CatFamily::ALL.contains(&CatFamily::QrpLabs));
         assert!(CatFamily::ALL.contains(&CatFamily::RsHfiq));
+        assert!(CatFamily::ALL.contains(&CatFamily::TrUsdx));
+        // A (tr)uSDX serves its own serial port over USB, like a QMX.
+        assert!(!CatFamily::TrUsdx.is_network());
         // An RS-HFIQ's control link is a serial port on the board itself
         // (issue #383).
         assert!(!CatFamily::RsHfiq.is_network());
