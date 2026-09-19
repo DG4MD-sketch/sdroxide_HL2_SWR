@@ -469,12 +469,27 @@ impl SdroxideApp {
                 cmds.push(Command::DigiTxActive(true));
             }
             if crate::chrome::chip(ui, false, " CLEAR ")
-                .on_hover_text("Stop sending and drop whatever has not gone out")
+                .on_hover_text(
+                    "Stop sending and drop whatever has not gone out. With the straight \
+                     key on, the read-back over what you keyed goes with it.",
+                )
                 .clicked()
             {
                 self.text_tx.clear();
                 cmds.push(Command::DigiAbortTx);
                 cmds.push(Command::DigiTxText(String::new()));
+                if self.cw_straight {
+                    // The box is not the text keyer's — it shows the straight
+                    // key's read-back — so the send-row CLEAR empties that too,
+                    // both here and in the engine, instead of only stopping the
+                    // transmission around a picture that stays on the panel.
+                    if let Some(s) = self.digi_status.as_mut() {
+                        if let Some(cw) = s.cw.as_mut() {
+                            cw.sent_text.clear();
+                        }
+                    }
+                    cmds.push(Command::DigiClearRx);
+                }
             }
 
             // Which bargain the operator wants: a character on the air as it is
