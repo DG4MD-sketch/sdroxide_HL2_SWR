@@ -7393,6 +7393,18 @@ pub struct RadioConfig {
     /// exactly right: no row means no trim, and the radio transmits at the
     /// operator's Drive setting on every band as it always did.
     pub tx_drive_trim: Vec<BandDriveTrim>,
+    /// A hard ceiling on transmit drive that the operator sets once for this
+    /// radio, as a `0..1` fraction of full drive, or `None` for none. Appended
+    /// after `tx_drive_trim`, for the same reason as every field above it: the
+    /// layout is positional, so a new block goes on the end and nowhere else,
+    /// and `RadioConfig` rides `ServerMsg::RadioConfig` and
+    /// `Command::SetRadioConfig` whole (issue #504).
+    ///
+    /// `None` in a configuration written before this existed and `None` by
+    /// default, because a ceiling nobody asked for is a radio that quietly
+    /// refuses to make its rated power. See [`Self::tx_drive_ceiling`] for what
+    /// it is for and why it is not the band table.
+    pub tx_drive_max: Option<f32>,
 }
 
 impl RadioConfig {
@@ -7435,6 +7447,33 @@ impl RadioConfig {
         }
         let band = Band::containing(tx_dial_hz);
         self.tx_drive_trim.iter().find(|t| t.band == band).map(BandDriveTrim::db).unwrap_or(0.0)
+    }
+
+    /// The operator's own ceiling on transmit drive, held to `0..1`, or `None`
+    /// where they have set none (issue #504).
+    ///
+    /// Distinct from [`Self::drive_trim_db`], and the distinction is the whole
+    /// point of having both. The band table is a *calibration*: it trims the
+    /// Drive setting so one number means one output power across the bands, and
+    /// a calibrated band can still be driven to the top of the slider. This is
+    /// a *limit*: a number the Drive and TUNE controls cannot be taken past,
+    /// whatever the slider says and whatever the calibration does to it.
+    ///
+    /// What it is for is a transmitter whose full-scale baseband is far past
+    /// what its amplifier can take. On an HPSDR set the protocol's own drive
+    /// register is pinned at full scale and the I/Q amplitude *is* the drive,
+    /// so the top of the slider is the transmitter wide open: an ANAN-7000DLE
+    /// makes about 50 W at 15% and well over 200 W out of 100 W-rated finals a
+    /// little above that, with nothing between a slip of the mouse and a
+    /// destroyed PA. A ceiling set once puts the usable range back under the
+    /// whole travel of the control.
+    ///
+    /// A zero or a NaN in a hand-edited `radio.json` reads as no ceiling rather
+    /// than as a radio that cannot transmit: a configuration file is not a
+    /// sensible place to discover you have muted your own transmitter, and the
+    /// operator who wants no output turns the Drive control down.
+    pub fn tx_drive_ceiling(&self) -> Option<f32> {
+        self.tx_drive_max.filter(|c| c.is_finite() && *c > 0.0).map(|c| c.min(1.0))
     }
 
     /// The converter offset in force at `dial_hz`, read-only.

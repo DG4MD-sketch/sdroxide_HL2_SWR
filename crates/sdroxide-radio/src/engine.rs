@@ -2397,6 +2397,11 @@ struct Engine {
     /// back to the store. Empty on the overwhelming majority of stations, which
     /// is what makes [`Self::refresh_drive_trim`] free there.
     drive_trim: Vec<sdroxide_types::BandDriveTrim>,
+    /// The operator's own hard ceiling on transmit drive, as a `0..1` fraction,
+    /// or `None` for none — held here for the same reason as `drive_trim`: it
+    /// is read on every transmitted block. See
+    /// [`sdroxide_types::RadioConfig::tx_drive_ceiling`] (issue #504).
+    tx_drive_max: Option<f32>,
     /// The operator's fixed receive-audio trim, in dB — the other part of
     /// `radio.json` the engine keeps a copy of, and for the same reason as
     /// `drive_trim`: the mixer that applies it is rebuilt whenever the sound
@@ -3911,6 +3916,7 @@ fn engine_thread(
         tx_freq_told: None,
         drive_trim_db: 0.0,
         drive_trim: radio_cfg.tx_drive_trim.clone(),
+        tx_drive_max: radio_cfg.tx_drive_ceiling(),
         rx_af_gain_db: radio_cfg.rx_audio_gain_db,
         tx_center_hz: 0.0,
         tx_ham_only: engine_cfg.tx_ham_only,
@@ -9481,6 +9487,24 @@ impl Engine {
                 // the radio running the configuration on disk, and the trim
                 // is corrected on the next reload either way.
                 self.drive_trim = cfg.tx_drive_trim.clone();
+                // And the ceiling beside it, live rather than at the next
+                // reopen: the operator setting one is very likely doing it
+                // because the radio is making too much power *now*.
+                let ceiling = cfg.tx_drive_ceiling();
+                if ceiling != self.tx_drive_max {
+                    match ceiling {
+                        Some(c) => info!(
+                            "TX drive ceiling set to {:.0}% — the Drive and TUNE controls \
+                             cannot be taken past it",
+                            c * 100.0
+                        ),
+                        None => info!(
+                            "TX drive ceiling removed — the Drive and TUNE controls now reach \
+                             full drive"
+                        ),
+                    }
+                }
+                self.tx_drive_max = ceiling;
                 let tx_hz = self.tx_freq_told.unwrap_or_else(|| self.state.tx_freq_hz());
                 self.refresh_drive_trim(tx_hz);
                 // The receive trim is the other half of that: live rather than
@@ -14977,8 +15001,8 @@ impl Engine {
     }
 
     /// The drive actually used: the operator's setting, calibrated for the band
-    /// it is going out on and then held under whatever ceiling the converter in
-    /// front of the radio imposes.
+    /// it is going out on and then held under whatever ceiling is in force —
+    /// the transverter in front of the radio, the operator's own, or both.
     ///
     /// Both corrections in one place, in that order, because they answer
     /// different questions and only one of them is a limit. The band trim is a
@@ -14987,7 +15011,9 @@ impl Engine {
     /// them (issue #295). The ceiling is a hard limit and therefore last: a
     /// transverter's I.F. input takes milliwatts, and the drive that is right
     /// for the radio's own bands destroys it, so no calibration may lift the
-    /// drive back over it (issue #278).
+    /// drive back over it (issue #278). A ceiling the operator set for the
+    /// radio itself binds the same way and for the same reason (issue #504);
+    /// see [`Self::under_ceiling`].
     ///
     /// Neither moves the operator's slider. The number they set for HF is still
     /// there when the dial leaves the transverter's band, and the trim is a
@@ -14996,8 +15022,25 @@ impl Engine {
         self.under_ceiling(want * self.drive_trim()).clamp(0.0, 1.0)
     }
 
+    /// Hold `want` under every ceiling in force — the station's and the
+    /// operator's — whichever is lower.
+    ///
+    /// Two of them, and they answer different questions. The source's is the
+    /// *station's*: a transverter's I.F. input takes milliwatts and the box in
+    /// front of the radio is the one that knows (issue #278). The operator's is
+    /// a figure they set once for this radio, for a transmitter whose full
+    /// scale is past what its own amplifier can take — an HPSDR set pins the
+    /// protocol's drive register at full and modulates the I/Q amplitude
+    /// instead, so the top of the slider is an ANAN's finals wide open (issue
+    /// #504). Neither is a calibration and neither moves the slider: they are
+    /// limits, and the lower of the two is the one that binds.
     fn under_ceiling(&self, want: f32) -> f32 {
-        match self.source.tx_drive_ceiling() {
+        let ceiling = match (self.source.tx_drive_ceiling(), self.tx_drive_max) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(c), None) | (None, Some(c)) => Some(c),
+            (None, None) => None,
+        };
+        match ceiling {
             Some(c) => want.min(c.clamp(0.0, 1.0)),
             None => want,
         }
