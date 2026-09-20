@@ -1383,7 +1383,7 @@ impl std::str::FromStr for Mode {
 ///
 /// Derived from [`NrLevel`] rather than stored: the wire carries the level, so a
 /// further engine costs three appended `NrLevel` variants and nothing else —
-/// which is exactly what NR2 cost when it was added in v147. This type is never
+/// which is exactly what NR2 cost when it was added in v159. This type is never
 /// serialised.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NrEngine {
@@ -1490,10 +1490,9 @@ impl NrStrength {
 /// **The declaration order is the wire format.** postcard encodes the
 /// discriminant positionally, so variants are only ever appended — the spectral
 /// group sits where it always did (1..3), the RNNoise group where proto v10 put
-/// it (4..6), the two engines added in v43 follow, and NR2's three were
-/// appended in v147. Nothing reads the
-/// declaration order but the wire: [`NrLevel::ALL`] and the picker impose the
-/// display order instead.
+/// it (4..6), the two engines added in v43 follow, and NR2's three were appended
+/// in v159. Nothing reads the declaration order but the wire: [`NrLevel::ALL`]
+/// and the picker impose the display order instead.
 ///
 /// The RNNoise variants were called `Ai*` until v43, when renaming them still
 /// cost nothing. It would cost something now: the operator's setting is kept in
@@ -1520,7 +1519,7 @@ pub enum NrLevel {
     DfLow,
     DfMed,
     DfHigh,
-    // WDSP NR2 (`Nr2`) — appended in v147, discriminants 13..15.
+    // WDSP NR2 (`Nr2`) — appended in v159, discriminants 13..15.
     Nr2Low,
     Nr2Med,
     Nr2High,

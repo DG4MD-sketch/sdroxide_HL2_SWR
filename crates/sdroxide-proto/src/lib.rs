@@ -1395,7 +1395,15 @@ use sdroxide_types::{
 /// card. `CatConfig` rides `Command::SetRadioConfig` whole, so the field sits
 /// mid-struct on the wire even appended last in the struct, and a peer without
 /// it runs off the end.
-pub const PROTO_VERSION: u16 = 158;
+///
+/// v159: NR2, the fifth noise-reduction engine — WDSP's Ephraim-Malah denoiser
+/// ported to `sdroxide-dsp`. [`sdroxide_types::NrLevel`] gains `Nr2Low`,
+/// `Nr2Med` and `Nr2High`, appended last so no surviving discriminant moved.
+/// `NrLevel` rides `RadioState::noise_reduction` and `Command::SetNoiseReduction`,
+/// so a v158 peer has no name for the three and fails to decode the state or the
+/// command carrying one — but only once NR2 is actually selected, since nothing
+/// else emits them.
+pub const PROTO_VERSION: u16 = 159;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]

@@ -13,8 +13,8 @@ different denoiser. We copy them, transcoded to little-endian `f32`.
 `f32` rather than the source's `f64` because the round-trip error is 5e-8,
 five orders of magnitude below the ~0.4 % the 0.25 dB grid and its bilinear
 interpolation cost anyway. Uncompressed because deflate only reaches 0.74 here
-(smooth float surfaces), and 117 KiB does not buy a new dependency in
-`sdroxide-dsp` the way JS8's 12x did in `sdroxide-digi`.
+(smooth float surfaces), and the 117 KiB that would save does not buy a new
+dependency in `sdroxide-dsp` the way JS8's 12x did in `sdroxide-digi`.
 
 This is a transcoder and nothing more: the values are upstream's, unedited, so
 the blob can be checked against WDSP byte for byte. That includes a known
