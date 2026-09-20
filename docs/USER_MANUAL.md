@@ -65,7 +65,7 @@ or connects to a remote sdroxide server.
   ([§3.17](#317-atchat-net)).
 - **Receive controls:** AGC (Off/Slow/Med/Fast), volume, mute, squelch, an
   impulse noise blanker, an adaptive auto-notch (constant-tone canceller),
-  noise reduction (four engines, three strengths each), front-end decimation
+  noise reduction (five engines, three strengths each), front-end decimation
   (trade span for resolution, processing gain and CPU on any IQ radio), RIT,
   and a
   draggable filter passband. On NFM, the CTCSS tone or DCS stream under the
