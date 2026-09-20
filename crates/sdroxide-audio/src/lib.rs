@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AudioError {
@@ -184,46 +184,101 @@ impl Glitches {
     }
 
     /// Record one and log it, at most once per [`GLITCH_REPORT_EVERY`] after
-    /// the first.
+    /// the first — and only as loudly as it deserves; see [`Say`].
     fn on_glitch(&self, what: &str, device: &str) {
         let total = self.n.fetch_add(1, Ordering::Relaxed) + 1;
         let Ok(mut said) = self.said.lock() else { return };
         let (last_total, at) = *said;
-        if total > 1 && at.elapsed() < GLITCH_REPORT_EVERY {
+        let elapsed = at.elapsed();
+        let say = Say::decide(self.costs_a_decode, total, elapsed);
+        if say == Say::Nothing {
             return;
         }
         *said = (total, Instant::now());
-        if !self.costs_a_decode {
-            // Recorded and reported, but not as a fault: nothing is listening
-            // to this stream unless the transmitter is keyed by voice, and then
-            // the hole is a millisecond of speech rather than a lost period.
-            info!(
-                "{what}: the audio stream from \"{device}\" glitched ({total} so far) — the \
-                 host lost samples between two callbacks. On the microphone this only matters \
-                 during a voice over, where it is a millisecond of speech; while receiving, \
-                 nothing reads this stream at all and it costs nothing. It is not why a \
-                 digital mode is failing to decode — look at the receiver's own audio stream \
-                 for that."
-            );
-            return;
+        match say {
+            Say::Nothing => unreachable!("returned above"),
+            Say::FirstHarmless => {
+                // Recorded and said once, but not as a fault: nothing is
+                // listening to this stream unless the transmitter is keyed by
+                // voice, and then the hole is a millisecond of speech rather
+                // than a lost period.
+                info!(
+                    "{what}: the audio stream from \"{device}\" glitched ({total} so far) — the \
+                     host lost samples between two callbacks. On the microphone this only \
+                     matters during a voice over, where it is a millisecond of speech; while \
+                     receiving, nothing reads this stream at all and it costs nothing. It is \
+                     not why a digital mode is failing to decode — look at the receiver's own \
+                     audio stream for that. Further glitches on this stream are counted but \
+                     not reported again."
+                );
+            }
+            Say::MoreHarmless => {
+                debug!(
+                    "{what}: {} more harmless audio glitch(es) from \"{device}\" in the last \
+                     {:.0} s ({total} since the stream opened)",
+                    total - last_total,
+                    elapsed.as_secs_f64()
+                );
+            }
+            Say::FirstFault => {
+                warn!(
+                    "{what}: the audio stream from \"{device}\" glitched — the host says \
+                     samples were lost between two callbacks, so what reaches the decoders has \
+                     a hole in it spliced out of it. A virtual audio cable (VB-Audio, VAC, \
+                     Flex DAX) does this routinely when the program feeding it is not keeping \
+                     exact pace; a real sound card doing it means this machine is not keeping \
+                     up. Further glitches on this stream are counted and summarised rather \
+                     than logged one by one."
+                );
+            }
+            Say::MoreFaults => {
+                warn!(
+                    "{what}: {} more audio glitch(es) from \"{device}\" in the last {:.0} s \
+                     ({total} since the stream opened)",
+                    total - last_total,
+                    elapsed.as_secs_f64()
+                );
+            }
         }
-        if total == 1 {
-            warn!(
-                "{what}: the audio stream from \"{device}\" glitched — the host says samples \
-                 were lost between two callbacks, so what reaches the decoders has a hole in \
-                 it spliced out of it. A virtual audio cable (VB-Audio, VAC, Flex DAX) does \
-                 this routinely when the program feeding it is not keeping exact pace; a real \
-                 sound card doing it means this machine is not keeping up. Further glitches on \
-                 this stream are counted and summarised rather than logged one by one."
-            );
-        } else {
-            let since = total - last_total;
-            warn!(
-                "{what}: {since} more audio glitch(es) from \"{device}\" in the last {:.0} s \
-                 ({total} since the stream opened)",
-                at.elapsed().as_secs_f64()
-            );
+    }
+}
+
+/// What one glitch is worth saying, which is not the same question as whether
+/// one happened.
+///
+/// Split out from the logging so the decision can be tested, because getting it
+/// wrong is not a cosmetic matter: a stream that reports a harmless glitch once
+/// a minute for as long as the program runs reads, to the operator scrolling
+/// the diagnostics window, exactly like a fault. Two of them filed it as one
+/// (issues #487 and #506) against a microphone the receiving station was not
+/// even reading — and the line they were reading says in its own text that it
+/// costs nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Say {
+    /// Nothing: inside the quiet period since the last report.
+    Nothing,
+    /// The first hole in a stream something is listening to.
+    FirstFault,
+    /// How many more there have been since the last summary.
+    MoreFaults,
+    /// The first hole in a stream nothing reads. Worth saying once, with why
+    /// it is not a fault, so an operator who goes looking has the answer.
+    FirstHarmless,
+    /// A later one of those: counted, and said only to a debug log. The count
+    /// is still there for anyone diagnosing; what is gone is the standing
+    /// alarm about a stream that costs nothing when it glitches.
+    MoreHarmless,
+}
+
+impl Say {
+    fn decide(costs_a_decode: bool, total: u64, since_last: Duration) -> Say {
+        if total <= 1 {
+            return if costs_a_decode { Say::FirstFault } else { Say::FirstHarmless };
         }
+        if since_last < GLITCH_REPORT_EVERY {
+            return Say::Nothing;
+        }
+        if costs_a_decode { Say::MoreFaults } else { Say::MoreHarmless }
     }
 }
 
@@ -1122,7 +1177,8 @@ pub fn start_output(
 #[cfg(test)]
 mod tests {
     use super::{
-        CAPTURE_BUFFER_MS, NameAssigner, PendingInput, capture_period_frames, config_candidates,
+        CAPTURE_BUFFER_MS, GLITCH_REPORT_EVERY, NameAssigner, PendingInput, Say,
+        capture_period_frames, config_candidates,
     };
     use std::time::{Duration, Instant};
 
@@ -1259,5 +1315,31 @@ mod tests {
         // B named second in both runs, so B keeps its suffix whichever order
         // the two were seen in.
         assert_eq!(name("dev:aaaa", "dev:bbbb"), name("dev:cccc", "dev:bbbb"));
+    }
+
+    /// A microphone nothing is reading must not report a fault once a minute
+    /// for the length of the session. Two operators read exactly that as
+    /// broken audio — issues #487 and #506 — off a stream whose own message
+    /// says it costs nothing.
+    #[test]
+    fn a_harmless_stream_says_its_piece_once_and_then_keeps_the_count_quietly() {
+        let quiet = GLITCH_REPORT_EVERY / 2;
+        let due = GLITCH_REPORT_EVERY + Duration::from_secs(1);
+
+        // The first one is news either way, and carries the explanation.
+        assert_eq!(Say::decide(false, 1, quiet), Say::FirstHarmless);
+        assert_eq!(Say::decide(true, 1, quiet), Say::FirstFault);
+
+        // Inside the quiet period nothing is said about either.
+        assert_eq!(Say::decide(false, 2, quiet), Say::Nothing);
+        assert_eq!(Say::decide(true, 2, quiet), Say::Nothing);
+
+        // After it, a stream that costs a decode is still warned about — and
+        // one that costs nothing is counted where only a debug log will see
+        // it, however many there have been.
+        assert_eq!(Say::decide(true, 2, due), Say::MoreFaults);
+        assert_eq!(Say::decide(true, 45, due), Say::MoreFaults);
+        assert_eq!(Say::decide(false, 2, due), Say::MoreHarmless);
+        assert_eq!(Say::decide(false, 45, due), Say::MoreHarmless);
     }
 }
