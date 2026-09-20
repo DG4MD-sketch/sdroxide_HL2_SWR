@@ -809,7 +809,7 @@ impl NavtexMessage {
     /// never sets the system clock from it (issue #212).
     ///
     /// Only a four-digit time that is *marked* as a time counts — followed by
-    /// `UTC`, `Z` or as `HHMMZ` — so a bare four-digit number in a position or
+    /// `UTC`, or run into a `Z` — so a bare four-digit number in a position or
     /// a serial is not mistaken for one. `HH:MM` is accepted too, since
     /// stations send it. The first such reading in the body wins; a message
     /// that states several is a forecast table, and the first is its header
@@ -829,24 +829,27 @@ pub(crate) fn parse_navtex_time(text: &str) -> Option<(u8, u8)> {
     let mut i = 0;
     while i + 3 < bytes.len() {
         // A four-digit run, optionally written `HH:MM`.
-        let digits = if bytes[i].is_ascii_digit()
+        let whole_word = i == 0 || !bytes[i - 1].is_ascii_digit();
+        let digits = if whole_word
+            && bytes[i].is_ascii_digit()
             && bytes[i + 1].is_ascii_digit()
             && bytes.get(i + 2) == Some(&b':')
             && bytes.get(i + 3).is_some_and(u8::is_ascii_digit)
             && bytes.get(i + 4).is_some_and(u8::is_ascii_digit)
         {
-            // Colon form: HH:MM.
+            // Colon form: HH:MM. Whole-word like the bare form below, or the
+            // tail of a longer number reads as an hour: `123:45` is not 23:45.
             Some((
                 (bytes[i] - b'0') * 10 + (bytes[i + 1] - b'0'),
                 (bytes[i + 3] - b'0') * 10 + (bytes[i + 4] - b'0'),
                 5usize,
             ))
-        } else if bytes[i..].len() >= 4
+        } else if whole_word
+            && bytes[i..].len() >= 4
             && bytes[i..i + 4].iter().all(u8::is_ascii_digit)
-            && (i == 0 || !bytes[i - 1].is_ascii_digit())
         {
-            // Bare form: HHMM, but only where it is a whole word (the guard
-            // above rejects the tail of a longer number).
+            // Bare form: HHMM, and `whole_word` is what keeps the tail of a
+            // longer number from being read as one.
             Some((
                 (bytes[i] - b'0') * 10 + (bytes[i + 1] - b'0'),
                 (bytes[i + 2] - b'0') * 10 + (bytes[i + 3] - b'0'),
@@ -862,13 +865,18 @@ pub(crate) fn parse_navtex_time(text: &str) -> Option<(u8, u8)> {
             //
             // * the digits run straight into a `Z` — `1200Z`, the maritime
             //   shorthand for "1200 UTC";
-            // * the next word is `UTC` (or `UT`), after any spaces — `1200 UTC`.
+            // * the next word is `UTC`, after any spaces — `1200 UTC`.
+            //
+            // Matched over bytes rather than a `&str` slice: `word[..3]` panics
+            // where byte 3 is inside a multi-byte character, and the body is
+            // only ASCII when it came from the decoder — a `NavtexMessage`
+            // arriving over the wire carries whatever the peer put in it.
             let after = &text[i + len..];
             let zulu = after.as_bytes().first().is_some_and(|c| c.eq_ignore_ascii_case(&b'Z'));
-            let word = after.trim_start();
+            let word = after.trim_start().as_bytes();
             let utc = word.len() >= 3
-                && word[..3].eq_ignore_ascii_case("UTC")
-                && word.as_bytes().get(3).is_none_or(|c| !c.is_ascii_alphabetic());
+                && word[..3].eq_ignore_ascii_case(b"UTC")
+                && word.get(3).is_none_or(|c| !c.is_ascii_alphabetic());
             if hh < 24 && mm < 60 && (zulu || utc) {
                 return Some((hh, mm));
             }
@@ -3569,8 +3577,23 @@ mod tests {
         // A time of day out of range is not a time either — 2560 is a serial.
         assert_eq!(parse_navtex_time("2560 UTC"), None, "hour 25");
         assert_eq!(parse_navtex_time("1299 UTC"), None, "minute 99");
-        // The tail of a longer number must not be read as HHMM either.
+        // The tail of a longer number must not be read as HHMM either, in
+        // both the bare and the colon form.
         assert_eq!(parse_navtex_time("REF 11200 UTC"), None);
+        assert_eq!(parse_navtex_time("REF 123:45 UTC"), None);
+    }
+
+    /// A body is ASCII when it came from the decoder — the CCIR 476 alphabet
+    /// has nothing else in it — but a `NavtexMessage` also arrives over the
+    /// wire, carrying whatever the peer put in it. Reading one must not take
+    /// the panel down.
+    #[test]
+    fn a_body_that_is_not_ascii_is_read_without_panicking() {
+        // A character boundary three bytes into the word after the digits:
+        // slicing a `&str` there panics.
+        assert_eq!(parse_navtex_time("1200 \u{e9}\u{e9}"), None);
+        assert_eq!(parse_navtex_time("\u{e9}\u{e9}\u{e9} 1200 UTC"), Some((12, 0)));
+        assert_eq!(parse_navtex_time("1200\u{e9}"), None);
     }
 
     /// The accessor reads the body, and a message with no time says so.
