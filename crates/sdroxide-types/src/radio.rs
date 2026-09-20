@@ -3661,26 +3661,38 @@ impl LimeDevice {
     /// enumeration on a machine with one plugged in offers a "Lime" device
     /// that is nothing of the kind. Opening it would flood the log with
     /// transfer errors and hand back a receiver that hears nothing.
-    pub const KNOWN_BOARDS: [&'static str; 8] = [
+    pub const KNOWN_BOARDS: [&'static str; 6] = [
         "LimeSDR-USB",
         "LimeSDR-Mini",
-        "LimeSDR-Mini_v2",
         "LimeNET-Micro",
         "LimeSDR-PCIe",
         "LimeSDR-QPCIe",
         "LimeSDR-Core",
-        "LimeSDR_Core",
     ];
+
+    /// One board name reduced to the spelling the allow-list is written in.
+    ///
+    /// LimeSuite punctuates the same board three ways — `LimeSDR-Mini`,
+    /// `LimeSDR_Core`, and, from 23.11, a bare space in `LimeSDR Mini` — so the
+    /// separator carries no meaning and is folded to one character before
+    /// anything is compared. Issue #508: a Mini on LimeSuite 23.11 enumerates
+    /// as `LimeSDR Mini, media=USB 3, module=FT601, …`, which the hyphenated
+    /// allow-list rejected as "not a Lime board", and the backend then reported
+    /// no LimeSDR present at all.
+    fn canonical_name(name: &str) -> String {
+        name.trim().to_ascii_lowercase().replace([' ', '_'], "-")
+    }
 
     /// Whether a device string names a board this backend recognises.
     ///
     /// Matched on a prefix and case-folded, because LimeSuite spells the same
     /// board differently across versions (`LimeSDR-USB` and `LimeSDR-USB_SP`
     /// are the same family) and the trailing variant is not worth a new entry
-    /// every time one appears.
+    /// every time one appears. `LimeSDR-Mini_v2` is covered by the `LimeSDR-Mini`
+    /// prefix for that reason, and needs no entry of its own.
     pub fn name_is_known(name: &str) -> bool {
-        let name = name.trim().to_ascii_lowercase();
-        Self::KNOWN_BOARDS.iter().any(|b| name.starts_with(&b.to_ascii_lowercase()))
+        let name = Self::canonical_name(name);
+        Self::KNOWN_BOARDS.iter().any(|b| name.starts_with(&Self::canonical_name(b)))
     }
 
     /// Whether `want` selects this board. Empty selects the first one found;
@@ -3725,8 +3737,11 @@ impl LimeDevice {
     /// `RX2_W`), one everywhere else. The Mini has a single chain; the
     /// LimeNET-Micro's LMS7002M has two but only one is wired to a connector.
     pub fn rx_channels(&self) -> usize {
-        let name = self.name.trim().to_ascii_lowercase();
-        let two = ["limesdr-usb", "limesdr-pcie", "limesdr-qpcie", "limesdr-core", "limesdr_core"];
+        // Through the same fold as the allow-list: a board spelled with a space
+        // is the same board, and reporting a `LimeSDR USB` as single-chain
+        // would hide its second front end from the picker.
+        let name = Self::canonical_name(&self.name);
+        let two = ["limesdr-usb", "limesdr-pcie", "limesdr-qpcie", "limesdr-core"];
         if two.iter().any(|b| name.starts_with(b)) { 2 } else { 1 }
     }
 
@@ -8686,6 +8701,35 @@ mod tests {
         assert_eq!(chains("LimeSDR-PCIe, media=PCIe"), 2);
         assert_eq!(chains("LimeSDR-Mini_v2, media=USB 3.0"), 1);
         assert_eq!(chains("LimeNET-Micro, media=USB 2.0"), 1);
+        // Spelled with a space, the way LimeSuite 23.11 writes it.
+        assert_eq!(chains("LimeSDR USB, media=USB 3.0"), 2);
+        assert_eq!(chains("LimeSDR Mini, media=USB 3"), 1);
+    }
+
+    /// However LimeSuite punctuates the board, it is the same board.
+    ///
+    /// Issue #508: the reported enumeration, verbatim from `LimeUtil --find` on
+    /// LimeSuite 23.11. The allow-list was hyphenated and matched on a prefix,
+    /// so a space-spelled Mini fell through to "not a Lime board, ignored" and
+    /// `LMS_Open` then said no LimeSDR was plugged in at all.
+    #[test]
+    fn a_board_is_known_however_its_name_is_punctuated() {
+        let known = |info: &str| LimeDevice::name_is_known(&LimeDevice::parse(info).name);
+        assert!(known("LimeSDR Mini, media=USB 3, module=FT601, serial=1D424CAEE0153C, index=0"));
+        assert!(known("LimeSDR-Mini, media=USB 3.0"));
+        assert!(known("LimeSDR-Mini_v2, media=USB 3.0"));
+        assert!(known("LimeSDR Mini v2, media=USB 3.0"));
+        assert!(known("LimeSDR-USB_SP, media=USB 3.0"));
+        assert!(known("LimeSDR_Core, media=PCIe"));
+        assert!(known("LimeNET Micro, media=USB 2.0"));
+
+        // And the reason the list is an allow-list: the bare Cypress FX3 id an
+        // unprogrammed RX-888 presents must still be turned away, whatever the
+        // fold does to the separators.
+        assert!(!known("Cypress USB BootLoader, media=USB 3.0"));
+        assert!(!known("Generic FX3, media=USB 3.0"));
+        assert!(!known("LimeRFE, media=USB"));
+        assert!(!known(""));
     }
 
     /// Which RX-888 panadapter widths the tuner's IF can actually fill.
