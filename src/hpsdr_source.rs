@@ -188,7 +188,14 @@ impl HpsdrSource {
                 cfg.ps_bins,
                 ps_decim.as_ref().map_or(1, |d| d.factor())
             );
-            if cfg.io_rx_input != sdroxide_types::HpsdrIoRxInput::IoBoardPureSignal {
+            // Only on a board that can have an IO board. The setting this
+            // names is a Hermes-Lite 2 accessory's, and it is not even offered
+            // on a Hermes or an ANAN — telling one of those that its IO board
+            // is set wrong sends the operator after a board they do not own
+            // (issue #518).
+            if board.has_io_board()
+                && cfg.io_rx_input != sdroxide_types::HpsdrIoRxInput::IoBoardPureSignal
+            {
                 tracing::warn!(
                     "HPSDR: PureSignal is on but the IO board's receive input is set to \"{}\" \
                      — unless you have wired the transmit sample in some other way, the T/R \
@@ -203,7 +210,7 @@ impl HpsdrSource {
         // nothing on J9 is deaf there, so the choice is not put on the panel of
         // an HL2 that has never used it.
         let io_rx_input = (board.protocol() == 1
-            && board.has_lna_gain()
+            && board.has_io_board()
             && cfg.ddc == 0
             && cfg.io_rx_input != sdroxide_types::HpsdrIoRxInput::Radio)
             .then_some(cfg.io_rx_input);

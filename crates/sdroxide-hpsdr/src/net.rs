@@ -76,6 +76,17 @@ pub fn board_has_lna_gain(board: &str) -> bool {
     board_is_hermes_lite(board)
 }
 
+/// Whether a board can have an N2ADR HL2IOBoard on it.
+///
+/// The IO board is a Hermes-Lite 2 accessory: it hangs off that board's I2C bus
+/// and its receive-input switching is an HL2 arrangement. No Metis, Hermes,
+/// Angelia, Orion or Saturn has one, so anything that names the IO board — a
+/// setting, a warning — has to ask this first rather than say it to every
+/// board in the family (issue #518).
+pub fn board_has_io_board(board: &str) -> bool {
+    board_is_hermes_lite(board)
+}
+
 /// Whether a board is an ANAN-7000/8000 (Orion 2) or ANAN-G2 (Saturn).
 ///
 /// These two are the boards with **two** ADCs and two Alex filter chains, and
@@ -982,6 +993,11 @@ impl HpsdrBoard {
         board_has_lna_gain(&self.inner.board)
     }
 
+    /// Whether this board can have an N2ADR HL2IOBoard on it.
+    pub fn has_io_board(&self) -> bool {
+        board_has_io_board(&self.inner.board)
+    }
+
     /// Attach DDC `ddc` and start its stream. Refused beyond
     /// [`HpsdrBoard::ddc_count`] — asking a Protocol 1 board for a second
     /// receiver — and for a DDC that already has a live stream: two engines
@@ -1326,6 +1342,25 @@ fn clamp_rate(hz: f64, protocol: u8) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The IO board is a Hermes-Lite 2 accessory. Issue #518: a Hermes was
+    /// told its IO board's receive input was set wrong, which is advice about
+    /// a board it cannot have and a setting it is never offered.
+    #[test]
+    fn only_a_hermes_lite_can_have_an_io_board() {
+        assert!(board_has_io_board("Hermes-Lite 2"));
+        assert!(board_has_io_board("Hermes-Lite"));
+        for other in [
+            "Hermes (ANAN-10/10E/100/100B)",
+            "Metis",
+            "Angelia (ANAN-100D)",
+            "Orion 2 (ANAN-7000/8000)",
+            "Saturn (ANAN-G2)",
+            "HPSDR",
+        ] {
+            assert!(!board_has_io_board(other), "{other} has no IO board to warn about");
+        }
+    }
 
     /// Fast attack, slow decay, and neither of them free-running. Issue #362.
     #[test]
