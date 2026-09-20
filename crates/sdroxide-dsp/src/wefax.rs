@@ -311,16 +311,23 @@ const PHASE_LINES: u32 = 5;
 /// next transmission has begun on top of it.
 ///
 /// Eight is four seconds at 120 LPM — short enough to lose almost none of the
-/// new chart's thirty-second phasing signal, long enough that a chart's own
-/// graphic has to hold the same shape for four seconds to fake it. Four was
-/// not (issue #496): a dark image with one bright feature in a fixed place
-/// passes the shape test line after line, and two seconds of it was cutting
-/// pictures up.
+/// new chart's thirty-second phasing signal, long enough that a moment's worth
+/// of chart that happens to look like phasing is not enough on its own. Four
+/// was not (issue #496), but note what the length does and does not buy: a
+/// graphic *fixed* in the chart holds its shape for the whole page, so no run
+/// length rejects it. That is [`phasing_skew_strict`]'s job; this only keeps a
+/// passing shape from cutting the page on a line or two of it.
 const REPHASE_LINES: u32 = 8;
 /// How far two phasing lines' pulses may sit apart, as a fraction of a line,
 /// and still be read as the same phasing signal. The line clock drifts by parts
-/// per million between lines; a picture that happened to look like phasing twice
-/// running would not put its white patch in the same place twice.
+/// per million between lines, so a real signal's pulse barely moves; what this
+/// rejects is *moving* picture content, which is most of it.
+///
+/// It was once reasoned that a picture would not put its white patch in the
+/// same place twice running. A chart's fixed graphic does exactly that, for as
+/// many lines as it is on the page — which is how pictures were being cut in
+/// two (issue #496) — so this tolerance narrows the field and does not close
+/// it. The shape test in [`phasing_skew_strict`] is what closes it.
 const REPHASE_TOL: f64 = 0.02;
 
 impl WefaxRx {
@@ -574,10 +581,14 @@ impl WefaxRx {
     /// Whether `line` continues a run of phasing lines long enough to mean the
     /// next transmission has started on top of the picture being built.
     ///
-    /// The pulses have to line up. One dark line with a bright patch in it is
-    /// something a satellite image or a heavily inked chart can produce; four
-    /// in a row with the patch in the same place, to within the line clock's own
-    /// drift, is a phasing signal.
+    /// The pulses have to line up: [`REPHASE_LINES`] in a row with the patch in
+    /// the same place, to within the line clock's own drift.
+    ///
+    /// The run is not on its own what tells a phasing signal from a picture —
+    /// a graphic fixed in the chart repeats for as long as it is on the page,
+    /// however long the run is asked to be (issue #496). What carries it is the
+    /// *shape* test in [`phasing_skew_strict`]; the run and the consistency
+    /// narrow the window a passing shape has to survive.
     fn note_phasing_line(&mut self, line: &[f32]) -> bool {
         // The strict test: mid-picture, a line that is merely "mostly black
         // with a white patch" is a chart's own graphic, not a phasing pulse.
@@ -750,6 +761,14 @@ fn phasing_skew(line: &[f32]) -> Option<u32> {
 /// phasing pulse lands at an arbitrary offset (issue #276); requiring it at the
 /// end of the buffer rejected real rephases. Shape here, and the place-to-place
 /// consistency of `note_phasing_line`, are what tell phasing from picture.
+///
+/// Where this stops: a chart feature that is *itself* a narrow near-white strip
+/// on an almost-black line is a phasing pulse as far as any of these tests can
+/// tell — same width, same brightness, same place line after line — and it will
+/// still cut a page. Nothing here can separate the two, and neither can a
+/// longer run. What is ruled out is the broad bright area a dark chart actually
+/// tends to carry, which is the shape issue #496 was reported on (DWD line-art
+/// charts, mostly white, never come near the mean threshold at all).
 ///
 /// Used only for the mid-picture rephase. Phasing proper uses the lenient test,
 /// because there the pulse is expected and a noisy line should still align.
