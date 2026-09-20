@@ -2543,6 +2543,10 @@ struct Engine {
     cw_monitor_rs: Option<MonoResampler>,
     cw_monitor_rate: f64,
     cw_monitor_out: Vec<f32>,
+    /// One-shot diagnostic: warned once that the monitor queue is filling
+    /// faster than the speaker drains it (device unhooked or wedged). Cleared
+    /// again when a drain does serve audio.
+    cw_monitor_warned: bool,
     /// When the current keyer over was requested, so one that never reached the
     /// air (the transmit rails refused, a digital-voice burst was aborted)
     /// releases the keyer instead of leaving it stuck "transmitting".
@@ -3987,6 +3991,7 @@ fn engine_thread(
         cw_monitor_rs: None,
         cw_monitor_rate: 0.0,
         cw_monitor_out: Vec::new(),
+        cw_monitor_warned: false,
         voice_started: None,
         voice_tick: None,
         tx_pace: None,
@@ -15637,6 +15642,7 @@ impl Engine {
             Some(rs) => rs.push(&self.cw_monitor_q, &mut ready),
             None => ready.extend_from_slice(&self.cw_monitor_q),
         }
+        self.cw_monitor_warned = false;
         self.cw_monitor_q.clear();
         self.cw_monitor_out.clear();
         let take = ready.len().min(n);
@@ -15884,10 +15890,26 @@ impl Engine {
         // drains them at its own rate (see `take_cw_monitor`). Only while
         // transmitting, so the queue is empty on every other mode and between
         // overs.
-        if self.digi_config.cw_sidetone && self.state.rx[0].mode == Mode::Cw {
+        //
+        // Gated on the engine actually sending CW — `DigiEngine::mode()` — and
+        // not on what the rig happens to be reporting: MCW commands the digi
+        // sideband, so the radio's mode can read as something else while the
+        // keyer is the one producing this audio (and the CW controller is only
+        // ever built for `Mode::Cw`), and the sidetone must follow the thing
+        // being sent, not the rig's echo of it.
+        if self.digi_config.cw_sidetone
+            && self.digi.as_ref().is_some_and(|d| d.mode() == Mode::Cw)
+        {
             let room = CW_MONITOR_CAP.saturating_sub(self.cw_monitor_q.len());
             if room > 0 {
                 self.cw_monitor_q.extend_from_slice(&out[..room.min(out.len())]);
+            } else if !self.cw_monitor_warned {
+                self.cw_monitor_warned = true;
+                warn!(
+                    "CW sidetone monitor: queue full and undrained ({}) — is the speaker \
+                     output serving audio?",
+                    self.cw_monitor_q.len()
+                );
             }
         }
         done
