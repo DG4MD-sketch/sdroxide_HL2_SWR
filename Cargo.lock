@@ -7862,7 +7862,6 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 [[package]]
 name = "xng-acars"
 version = "0.21.0"
-source = "git+https://github.com/airframesio/xng.git?rev=096c805#096c805278faa0a904de7d98066bf4cf395cb6c2"
 dependencies = [
  "base64 0.22.1",
  "crc",
@@ -7875,7 +7874,6 @@ dependencies = [
 [[package]]
 name = "xng-dsp"
 version = "0.21.0"
-source = "git+https://github.com/airframesio/xng.git?rev=096c805#096c805278faa0a904de7d98066bf4cf395cb6c2"
 dependencies = [
  "crc",
  "num-complex",
@@ -7885,7 +7883,6 @@ dependencies = [
 [[package]]
 name = "xng-mode-hfdl"
 version = "0.21.0"
-source = "git+https://github.com/airframesio/xng.git?rev=096c805#096c805278faa0a904de7d98066bf4cf395cb6c2"
 dependencies = [
  "chrono",
  "num-complex",
@@ -7899,7 +7896,6 @@ dependencies = [
 [[package]]
 name = "xng-types"
 version = "0.21.0"
-source = "git+https://github.com/airframesio/xng.git?rev=096c805#096c805278faa0a904de7d98066bf4cf395cb6c2"
 dependencies = [
  "chrono",
  "serde",
