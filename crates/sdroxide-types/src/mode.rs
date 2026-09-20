@@ -269,6 +269,20 @@ pub enum Mode {
     ///
     /// Appended for the same reason as [`Mode::Hell`].
     Acars,
+    /// HFDL (ARINC 635) — the HF aircraft datalink: ground stations on the
+    /// shortwave band talking to aircraft over the ocean, carrying position,
+    /// performance, frequency and ACARS traffic.
+    ///
+    /// A receive-only lane like [`Mode::Adsb`], [`Mode::Vdl2`] and
+    /// [`Mode::Ais`], and a `Mode` for the same reason: it is a thing to point
+    /// the receiver at, owns its own downconverted lane, has neither audio nor
+    /// a transmitter, and shares none of the digital modes' configuration.
+    ///
+    /// Unlike those three its channel is one of a published plan spread across
+    /// 2.8–22 MHz, not a single worldwide frequency, so the panel's own
+    /// frequency control chooses it; the dial follows but does not decide.
+    /// Appended for the same reason as [`Mode::Hell`].
+    Hfdl,
 }
 
 /// The bands on which a mode that keeps phone practice rides the lower
@@ -289,7 +303,7 @@ const PHONE_LSB_BANDS: [(f64, f64); 3] =
 impl Mode {
     /// Every mode, in the order they cycle and appear in the picker — which is
     /// deliberately *not* the enum's declaration order (see [`Mode::Hell`]).
-    pub const ALL: [Mode; 41] = [
+    pub const ALL: [Mode; 42] = [
         Mode::Lsb,
         Mode::Usb,
         Mode::Cw,
@@ -331,6 +345,7 @@ impl Mode {
         Mode::Hell,
         Mode::RfPaint,
         Mode::Rade,
+        Mode::Hfdl,
     ];
 
     /// The digital modes handled by a dedicated decode/encode engine (the
@@ -445,6 +460,18 @@ impl Mode {
         matches!(self, Mode::Ais)
     }
 
+    /// True for HFDL, the ARINC 635 shortwave aircraft datalink.
+    ///
+    /// Not [`Mode::is_digital`], for the reason [`Mode::is_adsb`] is not: it is
+    /// decoded from the raw I/Q by a lane of its own, transmits nothing, and
+    /// shares none of the digital modes' configuration. Unlike the other lanes
+    /// its channel is one of a plan spread across the shortwave band rather
+    /// than a single worldwide frequency, so the panel chooses it — the dial
+    /// follows the choice but does not decide it.
+    pub fn is_hfdl(self) -> bool {
+        matches!(self, Mode::Hfdl)
+    }
+
     /// True for the modes that own the bottom panel.
     ///
     /// [`Mode::is_digital`] used to answer this on its own, which was true
@@ -452,7 +479,7 @@ impl Mode {
     /// questions are separate: this one decides whether the panadapter shares
     /// the window, and that one decides who is being handed audio.
     pub fn has_bottom_panel(self) -> bool {
-        self.is_digital() || self.is_adsb() || self.is_vdl2() || self.is_ais()
+        self.is_digital() || self.is_adsb() || self.is_vdl2() || self.is_ais() || self.is_hfdl()
     }
 
     /// True for the modes decoded by a wideband engine lane off the raw I/Q
@@ -751,6 +778,7 @@ impl Mode {
             Mode::Vdl2 => "VDL2",
             Mode::Isb => "ISB",
             Mode::Ais => "AIS",
+            Mode::Hfdl => "HFDL",
             Mode::AtChat => "ATCHAT",
         }
     }
@@ -859,6 +887,10 @@ impl Mode {
             // dial, and this is the pair of slots drawn on the panadapter so
             // an operator can see that both are being listened to.
             Mode::Ais => (-37_500.0, 37_500.0),
+            // The lane is a fixed 24 kHz channel centred on the chosen HFDL
+            // frequency; nothing is carved out of it, so the passband is the
+            // lane, drawn only so the panadapter can shade what is read.
+            Mode::Hfdl => (-12_000.0, 12_000.0),
             Mode::Digu => (200.0, 3200.0),
             Mode::Digl => (-3200.0, -200.0),
             Mode::Dsb => (-2850.0, 2850.0),
@@ -1079,7 +1111,13 @@ impl Mode {
             // ADS-B joins them for the same reason WFM does: no radio with an
             // I.F. output has this mode, so there is no separate offset for it
             // to have, and FM's is the one a wideband receiver already uses.
-            Mode::Nfm | Mode::Wfm | Mode::Adsb | Mode::Vdl2 | Mode::Ais | Mode::HdRadio => C::Fm,
+            Mode::Nfm
+            | Mode::Wfm
+            | Mode::Adsb
+            | Mode::Vdl2
+            | Mode::Ais
+            | Mode::Hfdl
+            | Mode::HdRadio => C::Fm,
             // Everything a rig would be put into DATA (or DIGI) for, on either
             // sideband — including RIFP and VHF packet, which the rig carries
             // as FM data rather than SSB but still through its data input.
@@ -1125,7 +1163,14 @@ impl Mode {
         // front of.
         !matches!(
             self,
-            Mode::Nfm | Mode::Wfm | Mode::Drm | Mode::Adsb | Mode::Vdl2 | Mode::Ais | Mode::HdRadio
+            Mode::Nfm
+                | Mode::Wfm
+                | Mode::Drm
+                | Mode::Adsb
+                | Mode::Vdl2
+                | Mode::Ais
+                | Mode::Hfdl
+                | Mode::HdRadio
         )
     }
 
@@ -1290,6 +1335,9 @@ impl Mode {
             // hears whichever it is over, and this is how the shading says
             // which of the two it is doing.
             Mode::Ais => &[("25k", -12_500.0, 12_500.0), ("75k", -37_500.0, 37_500.0)],
+            // The lane's own width, and nothing narrower: the demod reads the
+            // whole 24 kHz channel, so this only shades what is read.
+            Mode::Hfdl => &[("24k", -12_000.0, 12_000.0)],
             // The one digital mode with a real filter choice: 1200 Bell 202
             // occupies about 10 kHz and 9600 G3RUH about 16 kHz, so the
             // operator wants the narrower one when running 1200 on a busy
@@ -1751,7 +1799,11 @@ mod tests {
                 assert!(all_symmetric, "{m:?} mirrors its edges but has an off-centre preset");
             } else if !m.filter_presets().is_empty() {
                 assert!(
-                    !all_symmetric || m == Mode::Adsb || m == Mode::Vdl2 || m == Mode::Ais,
+                    !all_symmetric
+                        || m == Mode::Adsb
+                        || m == Mode::Vdl2
+                        || m == Mode::Ais
+                        || m == Mode::Hfdl,
                     "{m:?} has only symmetric presets — should its edges mirror?"
                 );
             }
@@ -1810,6 +1862,7 @@ mod tests {
             (Mode::AtChat, 38),
             (Mode::HdRadio, 39),
             (Mode::Acars, 40),
+            (Mode::Hfdl, 41),
         ];
         for (mode, index) in pinned {
             assert_eq!(mode as u8, index, "{} moved", mode.label());
@@ -1856,7 +1909,7 @@ mod tests {
         // dropped and nothing listed twice.
         // The last variant *by discriminant*, which is the one appended most
         // recently — not the one that reads last in the picker.
-        let last = Mode::Acars as u8;
+        let last = Mode::Hfdl as u8;
         for i in 0..=last {
             let present = Mode::ALL.iter().filter(|m| **m as u8 == i).count();
             assert_eq!(present, 1, "discriminant {i} appears {present} times in Mode::ALL");
@@ -1881,9 +1934,22 @@ mod tests {
         assert!(!Mode::Acars.tunes_off_dial());
     }
 
+    /// HFDL is a panel-owning lane: it decides the layout question
+    /// (`has_bottom_panel`) exactly as ADS-B, VDL2 and AIS do, and nothing
+    /// about the digi engine.
     #[test]
-    fn rtty_on_fm_is_a_channel_not_a_sideband() {
-        assert!(Mode::RttyFm.is_text_modem(), "it is the RTTY modem and wants the RTTY panel");
+    fn hfdl_owns_a_panel_like_the_other_lanes() {
+        assert!(Mode::Hfdl.has_bottom_panel());
+        assert!(Mode::Hfdl.is_hfdl());
+        assert!(!Mode::Hfdl.is_digital());
+        assert_eq!(Mode::Hfdl.label(), "HFDL");
+        // The lane is a fixed 24 kHz channel, symmetric about its centre.
+        assert_eq!(Mode::Hfdl.default_filter(), (-12_000.0, 12_000.0));
+        assert!(Mode::Hfdl.filter_presets().iter().all(|(_, lo, hi)| lo == &-hi));
+    }
+
+    #[test]
+    fn rtty_on_fm_is_a_channel_not_a_sideband() {        assert!(Mode::RttyFm.is_text_modem(), "it is the RTTY modem and wants the RTTY panel");
         assert!(Mode::RttyFm.is_digital());
         assert!(Mode::RttyFm.is_fm_carrier(), "the level is deviation, not drive");
         assert!(Mode::RttyFm.is_carrier_centered(), "the dial is the channel centre");

@@ -440,9 +440,6 @@ pub struct SdroxideApp {
     /// the rolling decode log — as last reported by the engine. `None` until
     /// the decoder has been enabled at least once this session.
     hfdl_status: Option<sdroxide_types::HfdlStatus>,
-    /// Whether the HFDL window is open. The decoder's work does not care: it
-    /// runs off the config on the engine side, like the ISM one.
-    show_hfdl: bool,
     /// HFDL: the aircraft plot table and the map's pan/zoom and selection. Its
     /// own table rather than the decode log's, so an aircraft stays on the map
     /// after its earliest decodes have scrolled out of the log.
@@ -1351,7 +1348,6 @@ impl SdroxideApp {
             ism_sort_desc: true,
             qo100_status: None,
             hfdl_status: None,
-            show_hfdl: false,
             hfdl_map: crate::hfdl_map::HfdlMapState::default(),
             hfdl_filter: String::new(),
             show_settings: false,

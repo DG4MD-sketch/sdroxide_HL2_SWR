@@ -163,6 +163,8 @@ impl<'a> Speaker<'a> {
             // and is dropped, leaving "V D L".
             Mode::Vdl2 => "V D L two",
             Mode::Ais => "A I S",
+            // Spelt out for the same reason every other initialism here is.
+            Mode::Hfdl => "H F D L",
             Mode::AtChat => "at chat",
         }
     }

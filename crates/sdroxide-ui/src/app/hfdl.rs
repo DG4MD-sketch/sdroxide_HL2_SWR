@@ -16,7 +16,7 @@
 //! panel uses, and where it sits is remembered with the rest of the view state.
 
 use eframe::egui::{self, RichText};
-use sdroxide_types::{Command, HfdlDecode, HfdlStatus};
+use sdroxide_types::{Command, HfdlDecode, HfdlStatus, Mode};
 
 use crate::app::SdroxideApp;
 
@@ -25,151 +25,124 @@ use crate::app::SdroxideApp;
 /// 21 931 kHz primary is first: it is the default channel and the reference
 /// off-air capture that validated the decoder was recorded on it.
 const HFDL_PLAN_KHZ: &[u32] = &[
-    21_931,
-    2_941,
-    2_992,
-    3_455,
-    3_917,
-    5_451,
-    6_562,
-    6_640,
-    8_843,
-    10_060,
-    10_084,
-    11_184,
-    11_387,
-    13_306,
-    13_309,
-    13_312,
-    13_315,
-    13_318,
-    17_904,
-    17_910,
-    17_913,
-    17_916,
-    17_919,
-    17_922,
-    17_925,
-    21_934,
-    21_940,
+    21_931, 2_941, 2_992, 3_455, 3_917, 5_451, 6_562, 6_640, 8_843, 10_060, 10_084, 11_184, 11_387,
+    13_306, 13_309, 13_312, 13_315, 13_318, 17_904, 17_910, 17_913, 17_916, 17_919, 17_922, 17_925,
+    21_934, 21_940,
 ];
 
-/// The HFDL window: run switch, channel, and the split decode log / aircraft map.
+/// The HFDL panel: run switch, channel, and the split decode log / aircraft
+/// map — docked under the waterfall like the other lane panels (ADS-B, AIS).
 impl SdroxideApp {
-    pub(in crate::app) fn hfdl_window(&mut self, ctx: &egui::Context, cmds: &mut Vec<Command>) {
-        if !self.show_hfdl {
-            return;
-        }
+    pub(in crate::app) fn hfdl_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        cmds: &mut Vec<Command>,
+        panel_h: f32,
+    ) {
         let now = crate::time::now_unix();
-        let mut open = self.show_hfdl;
-        // Edited as a copy and diffed at the end, the way the AIS window does: the
+        // Edited as a copy and diffed at the end, the way the AIS panel does: the
         // engine echoes the accepted settings back, so there is no apply step and
         // no way for the two copies to drift.
         let mut cfg = self.state.hfdl;
-        let resp = egui::Window::new("HFDL")
-            .id(crate::layout::salted_id(ctx, "HfdlWindow"))
-            .open(&mut open)
-            .frame(crate::chrome::window_frame())
-            .resizable(true)
-            .default_width(crate::layout::window_w(ctx, 760.0))
-            .default_height(crate::layout::window_h(ctx, 460.0))
-            .show(ctx, |ui| {
-                crate::chrome::window_body_bg(ui);
-                hfdl_status_strip(ui, self.hfdl_status.as_ref(), self.hfdl_map.len());
-                ui.add_space(4.0);
+        let content_bottom = ui.cursor().top() + panel_h - 4.0;
 
-                ui.horizontal(|ui| {
-                    if crate::chrome::chip_enabled(ui, true, cfg.enabled, "LISTEN")
-                        .on_hover_text(
-                            "Switches the engine's HFDL downconverter and decoder on or \
+        hfdl_status_strip(ui, self.hfdl_status.as_ref(), self.hfdl_map.len());
+        ui.add_space(2.0);
+
+        ui.horizontal(|ui| {
+            if crate::chrome::chip_enabled(ui, true, cfg.enabled, "LISTEN")
+                .on_hover_text(
+                    "Switches the engine's HFDL downconverter and decoder on or \
                              off. Decoding costs a 24 kHz lane and a worker thread whether \
                              the window is open or not.",
-                        )
-                        .clicked()
-                    {
-                        cfg.enabled = !cfg.enabled;
-                    }
-                    let mut khz = (cfg.frequency_hz / 1e3).round();
-                    let old_khz = khz;
-                    ui.add(
-                        egui::DragValue::new(&mut khz)
-                            .range(2_800.0..=30_000.0)
-                            .speed(1.0)
-                            .suffix(" kHz"),
-                    )
-                    .on_hover_text(
-                        "The channel (the assigned frequency) to listen on. Anything in the \
+                )
+                .clicked()
+            {
+                cfg.enabled = !cfg.enabled;
+            }
+            let mut khz = (cfg.frequency_hz / 1e3).round();
+            let old_khz = khz;
+            ui.add(
+                egui::DragValue::new(&mut khz).range(2_800.0..=30_000.0).speed(1.0).suffix(" kHz"),
+            )
+            .on_hover_text(
+                "The channel (the assigned frequency) to listen on. Anything in the \
                          band works — HFDL stations transmit on 2.8 to 22 MHz — against a \
                          fixed 24 kHz lane centred here.",
-                    );
-                    if khz != old_khz {
-                        cfg.frequency_hz = khz * 1e3;
-                    }
-                });
-                ui.add_space(4.0);
+            );
+            if khz != old_khz {
+                cfg.frequency_hz = khz * 1e3;
+            }
+        });
+        ui.add_space(4.0);
 
-                // The plan as pick chips, so a spot of a few kHz on the band is a
-                // single click away rather than a DragValue spin.
-                ui.horizontal_wrapped(|ui| {
-                    for &khz in HFDL_PLAN_KHZ {
-                        let on = (cfg.frequency_hz / 1e3).round() as u32 == khz;
-                        if crate::chrome::chip(ui, on, format!("{:.3} M", khz as f32 / 1e3))
-                            .on_hover_text(if khz == 21_931 {
-                                "Riverhead (northern Atlantic/north America) — the default, \
+        // The plan as pick chips, so a spot of a few kHz on the band is a
+        // single click away rather than a DragValue spin.
+        ui.horizontal_wrapped(|ui| {
+            for &khz in HFDL_PLAN_KHZ {
+                let on = (cfg.frequency_hz / 1e3).round() as u32 == khz;
+                if crate::chrome::chip(ui, on, format!("{:.3} M", khz as f32 / 1e3))
+                    .on_hover_text(if khz == 21_931 {
+                        "Riverhead (northern Atlantic/north America) — the default, \
                                  and the channel the decoder was validated on."
-                            } else {
-                                "An HFDL assigned frequency."
-                            })
-                            .clicked()
-                        {
-                            cfg.frequency_hz = f64::from(khz) * 1e3;
-                        }
-                    }
-                });
+                    } else {
+                        "An HFDL assigned frequency."
+                    })
+                    .clicked()
+                {
+                    cfg.frequency_hz = f64::from(khz) * 1e3;
+                }
+            }
+        });
 
-                ui.separator();
+        ui.separator();
 
-                // The log keeps a draggable share of the width; the rest is the
-                // map. Floors so neither pane can be dragged away to nothing.
-                let avail_h = (ui.available_height() - 2.0).max(120.0);
-                let full_w = ui.available_width();
-                const HANDLE_W: f32 = 7.0;
-                let log_w = (full_w * self.view.hfdl_split_fraction)
-                    .clamp(220.0, (full_w - HANDLE_W - 180.0).max(220.0));
+        // The log keeps a draggable share of the width; the rest is the map, as
+        // in the ADS-B panel. Floors so neither pane can be dragged away to
+        // nothing. On a phone the pane chips choose one or the other.
+        let avail_h = (content_bottom - ui.cursor().top()).max(90.0);
+        let pane = self.phone_pane(ui, Mode::Hfdl);
+        let full_w = ui.available_width();
+        const HANDLE_W: f32 = 7.0;
+        let log_w = (full_w * self.view.hfdl_split_fraction)
+            .clamp(220.0, (full_w - HANDLE_W - 180.0).max(220.0));
 
-                ui.horizontal_top(|ui| {
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(log_w, avail_h),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| self.hfdl_log_pane(ui, avail_h),
-                    );
-                    let h = crate::chrome::split_handle(ui, egui::vec2(HANDLE_W, avail_h), None);
-                    if h.dragged() {
-                        self.view.hfdl_split_fraction =
-                            ((log_w + h.drag_delta().x) / full_w.max(1.0)).clamp(0.15, 0.85);
-                    }
-                    ui.vertical(|ui| self.hfdl_map_pane(ui, now, avail_h));
-                });
-            });
-        if let Some(r) = &resp {
-            crate::chrome::paint_window_border(ctx, &r.response);
+        ui.horizontal_top(|ui| {
+            if pane.is_none_or(|p| p == 0) {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(if pane.is_some() { full_w } else { log_w }, avail_h),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| self.hfdl_log_pane(ui, avail_h),
+                );
+            }
+            if pane.is_none() {
+                let h = crate::chrome::split_handle(ui, egui::vec2(HANDLE_W, avail_h), None);
+                if h.dragged() {
+                    self.view.hfdl_split_fraction =
+                        ((log_w + h.drag_delta().x) / full_w.max(1.0)).clamp(0.15, 0.85);
+                }
+            }
+            if pane.is_none_or(|p| p == 1) {
+                ui.vertical(|ui| self.hfdl_map_pane(ui, now, avail_h));
+            }
+        });
+
+        // A channel change moves the dial with it, so the panadapter keeps
+        // showing what the lane is decoding; the lane follows its own frequency
+        // either way.
+        if cfg.frequency_hz != self.state.hfdl.frequency_hz {
+            cmds.push(Command::SetVfo { vfo: self.state.active_vfo, hz: cfg.frequency_hz });
         }
         if cfg != self.state.hfdl {
             cmds.push(Command::SetHfdlConfig(cfg));
         }
-        self.show_hfdl = open;
     }
 
     /// The decode log, newest first, with a filter over it.
     fn hfdl_log_pane(&mut self, ui: &mut egui::Ui, avail_h: f32) {
         ui.horizontal_wrapped(|ui| {
             ui.set_min_height(20.0);
-            ui.label(
-                RichText::new("DECODES")
-                    .size(10.5)
-                    .strong()
-                    .color(crate::theme::CYAN_DIM()),
-            );
+            ui.label(RichText::new("DECODES").size(10.5).strong().color(crate::theme::CYAN_DIM()));
             ui.add(
                 egui::TextEdit::singleline(&mut self.hfdl_filter)
                     .hint_text("filter")
@@ -228,11 +201,8 @@ fn hfdl_status_strip(ui: &mut egui::Ui, status: Option<&HfdlStatus>, aircraft: u
         Some(s) => (s.running, Some(s.level_dbfs), s.bursts, s.decodes),
         None => (false, None, 0, 0),
     };
-    let (run_text, run_ink) = if running {
-        ("RUNNING", crate::theme::GREEN())
-    } else {
-        ("OFF", crate::theme::gray(150))
-    };
+    let (run_text, run_ink) =
+        if running { ("RUNNING", crate::theme::GREEN()) } else { ("OFF", crate::theme::gray(150)) };
     slot(ui, 84.0, run_text, run_ink);
     let level_text = match level {
         Some(l) if l > -90.0 => format!("{l:.0} dBFS"),
@@ -248,9 +218,10 @@ fn hfdl_status_strip(ui: &mut egui::Ui, status: Option<&HfdlStatus>, aircraft: u
 /// names, the channel and the burst's signal report — then the payload, which
 /// for a position record is the fix itself, and otherwise the parser's fields.
 fn hfdl_log_row(ui: &mut egui::Ui, d: &HfdlDecode) {
+    let (_, _, _, h, mi, s) = sdroxide_types::utc_ymd_hms(d.unix);
     ui.horizontal_wrapped(|ui| {
         ui.label(
-            RichText::new(crate::time::utc_clock(d.unix))
+            RichText::new(format!("{h:02}:{mi:02}:{s:02}"))
                 .size(10.5)
                 .color(crate::theme::gray(120)),
         );
@@ -264,11 +235,11 @@ fn hfdl_log_row(ui: &mut egui::Ui, d: &HfdlDecode) {
                 .color(crate::theme::gray(150)),
         );
         if let Some(snr) = d.snr_db {
-            ui.label(
-                RichText::new(format!("{snr:.0} dB"))
-                    .size(10.5)
-                    .color(if snr >= 12.0 { crate::theme::GREEN() } else { crate::theme::YELLOW() }),
-            );
+            ui.label(RichText::new(format!("{snr:.0} dB")).size(10.5).color(if snr >= 12.0 {
+                crate::theme::GREEN()
+            } else {
+                crate::theme::YELLOW()
+            }));
         }
         if let Some(fec) = d.fec_corrected.filter(|f| *f > 0) {
             ui.label(
@@ -285,16 +256,10 @@ fn hfdl_log_row(ui: &mut egui::Ui, d: &HfdlDecode) {
                     .size(10.5)
                     .color(crate::theme::CYAN()),
             );
-            ui.label(
-                RichText::new(fix.label())
-                    .size(10.5)
-                    .color(crate::theme::gray(150)),
-            );
+            ui.label(RichText::new(fix.label()).size(10.5).color(crate::theme::gray(150)));
         } else if !d.details.is_empty() && d.details != "null" {
             ui.label(
-                RichText::new(tidy_details(&d.details))
-                    .size(10.0)
-                    .color(crate::theme::gray(120)),
+                RichText::new(tidy_details(&d.details)).size(10.0).color(crate::theme::gray(120)),
             );
         }
     });
@@ -317,12 +282,7 @@ fn hfdl_matches(d: &HfdlDecode, filter: &str) -> bool {
 /// separator. The panel shows the fields xng parsed rather than pretty-printing
 /// its structure, which at a glance is noise either way.
 fn tidy_details(details: &str) -> String {
-    details
-        .trim()
-        .trim_start_matches('{')
-        .trim_end_matches('}')
-        .replace('"', "")
-        .replace(',', "  ")
+    details.trim().trim_start_matches('{').trim_end_matches('}').replace('"', "").replace(',', "  ")
 }
 
 /// A counter, short enough that it cannot outgrow its slot.

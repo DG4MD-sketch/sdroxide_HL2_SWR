@@ -88,6 +88,9 @@ pub(in crate::app) fn panel_panes(mode: Mode) -> &'static [&'static str] {
         // Two, for the reason ADS-B has two: a safety broadcast nobody answers,
         // and the only two questions about it are what is out there and where.
         Mode::Ais => &["VESSELS", "CHART"],
+        // Two, for the reason ADS-B has two: the decode log and the aircraft
+        // the network has located, which move independently.
+        Mode::Hfdl => &["DECODES", "MAP"],
         Mode::Wefax => &["CHART", "SAVED"],
         Mode::Navtex => &["MESSAGES", "READING"],
         Mode::RfPaint => &["TEXT", "IMAGE"],

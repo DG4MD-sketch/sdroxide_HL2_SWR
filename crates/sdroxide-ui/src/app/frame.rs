@@ -429,9 +429,15 @@ impl eframe::App for SdroxideApp {
                 // is a view of nothing. The whole channel instead, which is
                 // also all there is on this band.
                 (dial - 1_500_000.0, dial + 1_500_000.0)
+            } else if mode.is_hfdl() {
+                // The lane is a fixed 24 kHz channel, and entering the mode
+                // put the dial on the chosen HFDL frequency; frame the channel
+                // with a little either side of it. The decoder reads the lane,
+                // not this view — the window is only so the operator can see
+                // the signal they are decoding.
+                (dial - 15_000.0, dial + 15_000.0)
             } else if mode.is_aprs() {
                 // APRS is deliberately *not* framed on its own channel.
-                //
                 // Every other digital mode is worked inside a sub-band, so
                 // framing that sub-band is a service. APRS is one channel on a
                 // band an operator has every reason to be watching — the
@@ -715,6 +721,8 @@ impl eframe::App for SdroxideApp {
                                     self.vdl2_panel(ui, &mut cmds, panel_h);
                                 } else if mode.is_ais() {
                                     self.ais_panel(ui, &mut cmds, panel_h);
+                                } else if mode.is_hfdl() {
+                                    self.hfdl_panel(ui, &mut cmds, panel_h);
                                 } else if mode.is_aprs() {
                                     self.aprs_panel(ui, &mut cmds, panel_h);
                                 } else if mode.is_packet() {
@@ -895,7 +903,6 @@ impl eframe::App for SdroxideApp {
         self.memories_window(&ctx, &mut cmds);
         self.scanner_window(&ctx, &mut cmds);
         self.ism_window(&ctx, &mut cmds);
-        self.hfdl_window(&ctx, &mut cmds);
         self.adsb_setup_window(&ctx, &mut cmds);
         self.cw_macro_window(&ctx, &mut cmds);
         self.ais_setup_window(&ctx, &mut cmds);

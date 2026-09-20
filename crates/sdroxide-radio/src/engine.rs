@@ -3640,6 +3640,24 @@ fn engine_thread(
             }
             state.band = Band::containing(hz);
         }
+        // ...and HFDL, whose channel is chosen in its panel rather than by the
+        // dial: there is a plan of assigned frequencies, so the mode brings the
+        // dial onto the chosen one and the panadapter shows the signal the lane
+        // is decoding. The lane follows its own frequency, so this is a view,
+        // not the tuning.
+        if mode.is_hfdl() {
+            let hz = state.hfdl.frequency_hz;
+            info!(
+                from = state.active_freq_hz(),
+                to = hz,
+                "HFDL channel selected; tuning the dial there"
+            );
+            match state.active_vfo {
+                Vfo::A => state.vfo_a_hz = hz,
+                Vfo::B => state.vfo_b_hz = hz,
+            }
+            state.band = Band::containing(hz);
+        }
     }
     let skim_cfg = sdroxide_config::load_skimmer_config();
     state.skimmer = if audio_mode {
@@ -16816,6 +16834,7 @@ fn rig_mode_class(m: Mode) -> u8 {
         | Mode::Adsb
         | Mode::Vdl2
         | Mode::Ais
+        | Mode::Hfdl
         | Mode::HdRadio => 5,
     }
 }
