@@ -1379,6 +1379,7 @@ use sdroxide_types::{
 /// fields by position: a v155 peer reads the extra bytes as the start of
 /// whatever follows the state, and fails to decode `HelloAck` and every state
 /// update.
+///
 /// v157: SSTV picture styling, `DigiConfig::sstv_style` (an
 /// `sdroxide_types::SstvStyle`) — the banner strip's gradient and outline, the
 /// banner text's colour, gradient and outline, a rainbow override for all the
@@ -1388,7 +1389,13 @@ use sdroxide_types::{
 /// `Command::SetDigiConfig` and `DigiStatus` whole, so a v156 peer reads the
 /// extra bytes as the start of the next field and fails to decode every digital
 /// status.
-pub const PROTO_VERSION: u16 = 157;
+///
+/// v158: the (tr)uSDX family. [`sdroxide_types::CatConfig`] gains
+/// `trusdx_audio`, which picks between audio in the CAT stream and a USB sound
+/// card. `CatConfig` rides `Command::SetRadioConfig` whole, so the field sits
+/// mid-struct on the wire even appended last in the struct, and a peer without
+/// it runs off the end.
+pub const PROTO_VERSION: u16 = 158;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]
