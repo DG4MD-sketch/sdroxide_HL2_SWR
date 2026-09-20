@@ -544,6 +544,7 @@ impl FlexHandle {
             actual_rate: Arc::clone(&actual_rate),
             alive: Arc::clone(&alive),
             last_count: HashMap::new(),
+            vita_header_warned: false,
             tx_count: 0,
             keyed: false,
             tx_started: None,
@@ -1717,6 +1718,9 @@ struct DataThread {
     alive: Arc<AtomicBool>,
     /// Last VITA packet counter per stream, for loss detection.
     last_count: HashMap<u32, u8>,
+    /// Whether a DAX I/Q packet declaring a header length this backend does not
+    /// assume has already been reported — once a session is enough.
+    vita_header_warned: bool,
     tx_count: u8,
     keyed: bool,
     /// When the current transmission started, and how many audio frames have
@@ -1856,6 +1860,32 @@ impl DataThread {
                         }
                         if let Some(rate) = p::dax_iq_rate(h.class_code) {
                             self.actual_rate.store(rate, Ordering::Relaxed);
+                        }
+                        // The payload is taken from a fixed seven-word header,
+                        // which is the shape a FLEX sends. A packet that
+                        // declares a different one would have its payload read
+                        // one or more words late — and one word late is one
+                        // float late, so I is read as Q and the spectrum comes
+                        // out mirrored: unintelligible on USB and on LSB alike,
+                        // while the radio's own panadapter and waterfall arrive
+                        // on other streams and go on looking perfect. That is
+                        // the shape of issue #368, so say so rather than let it
+                        // pass silently. Once per session: it would otherwise
+                        // be every packet.
+                        if h.declared_header_words() != p::VITA_HEADER_WORDS
+                            && !self.vita_header_warned
+                        {
+                            self.vita_header_warned = true;
+                            tracing::warn!(
+                                target: "smartsdr",
+                                stream = format!("0x{:08X}", h.stream_id),
+                                declared = h.declared_header_words(),
+                                assumed = p::VITA_HEADER_WORDS,
+                                class_id = h.has_class_id,
+                                tsi = h.tsi,
+                                tsf = h.tsf,
+                                "DAX I/Q packet header is not the length this backend assumes —                                  the I/Q is being read out of step, which mirrors the spectrum                                  (issue #368)"
+                            );
                         }
                         iq.clear();
                         p::decode_dax_iq(payload, &mut iq);
