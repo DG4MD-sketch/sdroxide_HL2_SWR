@@ -17,28 +17,50 @@
 
 (function () {
     let sentinel = null;
+    // The request in flight, if any. A request is a promise, and the guard
+    // below is on the far side of an await: without this a load and a first
+    // touch a few milliseconds apart both pass it, the browser hands out two
+    // sentinels, and only the second is ever tracked — so `set(false)` would
+    // release one lock and leave the screen held by the other.
+    let pending = null;
     let wanted = true;
 
     const SUPPORTED = window.isSecureContext && "wakeLock" in navigator;
 
     async function acquire() {
-        if (!SUPPORTED || !wanted || sentinel || document.hidden) return;
+        if (!SUPPORTED || !wanted || sentinel || pending || document.hidden) return;
         try {
-            sentinel = await navigator.wakeLock.request("screen");
+            pending = navigator.wakeLock.request("screen");
+            const s = await pending;
             // Dropped by the browser on hide, on a tab switch, or when the
             // system decides otherwise. Clearing it here is what lets the
-            // visibility handler below take a fresh one.
-            sentinel.addEventListener("release", function () {
-                sentinel = null;
+            // visibility handler below take a fresh one — and only when it is
+            // still the one being held, so a stale release cannot clear a
+            // newer lock and leave it untracked.
+            s.addEventListener("release", function () {
+                if (sentinel === s) sentinel = null;
             });
+            sentinel = s;
         } catch (e) {
             // Denied (battery saver, a policy, no user activation yet). Not an
             // error worth showing: the screen simply sleeps as it would have.
             sentinel = null;
+        } finally {
+            pending = null;
         }
     }
 
     async function release() {
+        // A request still in flight resolves into `sentinel` after this runs,
+        // so wait for it rather than walking away from a lock about to be
+        // handed to us.
+        if (pending) {
+            try {
+                await pending;
+            } catch (e) {
+                /* never arrived */
+            }
+        }
         if (!sentinel) return;
         const s = sentinel;
         sentinel = null;
