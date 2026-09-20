@@ -895,6 +895,7 @@ impl eframe::App for SdroxideApp {
         self.memories_window(&ctx, &mut cmds);
         self.scanner_window(&ctx, &mut cmds);
         self.ism_window(&ctx, &mut cmds);
+        self.hfdl_window(&ctx, &mut cmds);
         self.adsb_setup_window(&ctx, &mut cmds);
         self.cw_macro_window(&ctx, &mut cmds);
         self.ais_setup_window(&ctx, &mut cmds);
@@ -1383,6 +1384,7 @@ impl SdroxideApp {
                 RadioEvent::Vdl2Status(st) => self.vdl2_status = Some(st),
                 RadioEvent::AisStatus(st) => self.ais_status = Some(st),
                 RadioEvent::Qo100Status(st) => self.qo100_status = Some(st),
+                RadioEvent::HfdlStatus(st) => self.hfdl_status = Some(st),
                 RadioEvent::SstvStatus(s) => {
                     // Adopt a *newly* detected RX mode for the next transmit, but
                     // don't re-apply a steady detection every frame — that would

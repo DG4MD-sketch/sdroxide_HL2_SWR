@@ -1395,7 +1395,14 @@ use sdroxide_types::{
 /// card. `CatConfig` rides `Command::SetRadioConfig` whole, so the field sits
 /// mid-struct on the wire even appended last in the struct, and a peer without
 /// it runs off the end.
-pub const PROTO_VERSION: u16 = 158;
+///
+/// v159: the HFDL ground-network decoder's settings, `RadioState::hfdl` (issue
+/// #497). Appended to `RadioState`'s tail, and `RadioState` crosses whole, so a
+/// v158 peer reads the extra bytes as the start of the next field and fails to
+/// decode every state — the same break `RadioState`'s other appended decoders
+/// caused, and the same fix (the two sides must run in lockstep). The live
+/// decode log is engine-side only (`RadioEvent::HfdlStatus`), bridged nowhere.
+pub const PROTO_VERSION: u16 = 159;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]

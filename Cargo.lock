@@ -923,7 +923,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
+ "serde",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -5068,6 +5071,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sdroxide-hfdl"
+version = "1.6.16"
+dependencies = [
+ "crossbeam-channel",
+ "sdroxide-dsp",
+ "sdroxide-types",
+ "serde_json",
+ "tracing",
+ "xng-mode-hfdl",
+]
+
+[[package]]
 name = "sdroxide-hpsdr"
 version = "1.6.8"
 dependencies = [
@@ -5288,6 +5303,7 @@ dependencies = [
  "sdroxide-digi",
  "sdroxide-drm",
  "sdroxide-dsp",
+ "sdroxide-hfdl",
  "sdroxide-ism",
  "sdroxide-kiss",
  "sdroxide-net",
@@ -6815,6 +6831,7 @@ version = "1.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5772d71c9be8a8a6ac2117d949c5b224c1b72241bb611d9a3012edcf8af7812"
 dependencies = [
+ "getrandom 0.4.3",
  "js-sys",
  "serde_core",
  "wasm-bindgen",
@@ -7841,6 +7858,54 @@ name = "xml-rs"
 version = "0.8.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
+
+[[package]]
+name = "xng-acars"
+version = "0.21.0"
+source = "git+https://github.com/airframesio/xng.git?rev=096c805#096c805278faa0a904de7d98066bf4cf395cb6c2"
+dependencies = [
+ "base64 0.22.1",
+ "crc",
+ "miniz_oxide 0.8.9",
+ "serde",
+ "serde_json",
+ "xng-types",
+]
+
+[[package]]
+name = "xng-dsp"
+version = "0.21.0"
+source = "git+https://github.com/airframesio/xng.git?rev=096c805#096c805278faa0a904de7d98066bf4cf395cb6c2"
+dependencies = [
+ "crc",
+ "num-complex",
+ "rustfft",
+]
+
+[[package]]
+name = "xng-mode-hfdl"
+version = "0.21.0"
+source = "git+https://github.com/airframesio/xng.git?rev=096c805#096c805278faa0a904de7d98066bf4cf395cb6c2"
+dependencies = [
+ "chrono",
+ "num-complex",
+ "serde",
+ "serde_json",
+ "xng-acars",
+ "xng-dsp",
+ "xng-types",
+]
+
+[[package]]
+name = "xng-types"
+version = "0.21.0"
+source = "git+https://github.com/airframesio/xng.git?rev=096c805#096c805278faa0a904de7d98066bf4cf395cb6c2"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "uuid",
+]
 
 [[package]]
 name = "zbus"

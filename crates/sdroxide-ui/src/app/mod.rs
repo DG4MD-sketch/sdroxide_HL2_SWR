@@ -28,6 +28,7 @@ pub(in crate::app) mod hd;
 pub(in crate::app) mod ism;
 pub(in crate::app) mod logbook;
 pub(in crate::app) mod net;
+pub(in crate::app) mod hfdl;
 pub(in crate::app) mod panels;
 pub(crate) mod persist;
 pub(in crate::app) mod publicsdr;
@@ -435,6 +436,13 @@ pub struct SdroxideApp {
     /// frequency offset, decoded telemetry — as last reported by the engine.
     /// `None` until the decoder has been enabled at least once this session.
     qo100_status: Option<sdroxide_types::Qo100Status>,
+    /// The HFDL ground-network decoder's live status — level, decode count and
+    /// the rolling decode log — as last reported by the engine. `None` until
+    /// the decoder has been enabled at least once this session.
+    hfdl_status: Option<sdroxide_types::HfdlStatus>,
+    /// Whether the HFDL window is open. The decoder's work does not care: it
+    /// runs off the config on the engine side, like the ISM one.
+    show_hfdl: bool,
     show_settings: bool,
     /// Scroll the Settings window back to its tab bar on the frame it opens.
     /// The window's scroll offset is egui memory, which outlives both the
@@ -1335,6 +1343,8 @@ impl SdroxideApp {
             ism_sort: ism::IsmSort::default(),
             ism_sort_desc: true,
             qo100_status: None,
+            hfdl_status: None,
+            show_hfdl: false,
             show_settings: false,
             settings_scroll_top: true,
             voice: sdroxide_types::VoiceStatus::default(),
