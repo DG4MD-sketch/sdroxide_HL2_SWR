@@ -103,8 +103,8 @@ impl SdroxideApp {
                 ui.label(RichText::new("SNR —").size(12.0).color(dim));
             }
             // Who we last heard, from the End-of-Over frame that closed their
-            // over. Shown for a few seconds after the over ends, which is the
-            // only time a RADE station names itself.
+            // over — the only time a RADE station names itself. Held for a
+            // minute past the signal, then dropped by the controller.
             if let Some(call) = &dx_call {
                 ui.add_space(12.0);
                 ui.label(
@@ -117,7 +117,10 @@ impl SdroxideApp {
                     "The callsign the station put in its End-of-Over frame — the only \
                      point in a RADE over at which one is sent. It is also what is \
                      reported to FreeDV Reporter, so a station you hear appears on \
-                     qso.freedv.org as heard by you.",
+                     qso.freedv.org as heard by you.\n\n\
+                     Held for a minute after the signal goes, and dropped when you \
+                     start an over of your own: it names the station on frequency, \
+                     not every station the receiver has ever heard.",
                 );
             }
         });
