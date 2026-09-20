@@ -7809,6 +7809,8 @@ impl Engine {
             }
             SetSplit(on) => self.state.split = on,
             SetCenter(hz) => {
+                // Never onto the VFO itself: see `guarded_center`.
+                let hz = self.guarded_center(hz);
                 // Asking for the centre the front end is already on costs a
                 // hardware retune, a skimmer restart and a waterfall remap for
                 // nothing — and a panadapter pan held against the end of a
@@ -16553,6 +16555,45 @@ impl Engine {
         }
         let channel = self.main.as_ref().map(|c| c.channel_rate()).unwrap_or(48_000.0);
         (channel * 0.6).min(offset * 0.8)
+    }
+
+    /// A hardware centre the caller asked for, moved out of the active VFO's
+    /// guard band if it landed inside it.
+    ///
+    /// The panadapter's CTR keeps the window centred on the dial, and asks for
+    /// the centre by [`Command::SetCenter`] when the view reaches the edge of
+    /// the span. Taken literally that puts the hardware LO *on* the VFO, which
+    /// is the one place [`Self::lo_guard_hz`] exists to keep it away from: a
+    /// zero-IF front end has a DC spike at its LO, and the carrier-centred
+    /// modes have passbands that contain DC — AM's is +/-5 kHz — so the spike
+    /// lands in the demodulated channel and beats against the carrier. SSB and
+    /// CW never showed it because their passbands start a few hundred hertz up
+    /// and filter it away.
+    ///
+    /// So the request is honoured up to the guard and no further. The view
+    /// stays as near centred as the front end allows, and the operator keeps
+    /// the audio. Pushed to whichever side the request came from, so a window
+    /// panning up does not jump back down past the dial.
+    fn guarded_center(&self, want: f64) -> f64 {
+        let guard = self.lo_guard_hz();
+        if guard <= 0.0 {
+            return want;
+        }
+        let vfo = self.state.rx_freq_hz();
+        let d = want - vfo;
+        if d.abs() >= guard {
+            return want;
+        }
+        // Above by preference: that is where `retune_for_vfo` puts the LO, and
+        // at the top of a tuning range the mirror is the fallback there too.
+        let (first, second) =
+            if d < 0.0 { (vfo - guard, vfo + guard) } else { (vfo + guard, vfo - guard) };
+        for cand in [first, second] {
+            if self.can_tune(cand) {
+                return cand;
+            }
+        }
+        want
     }
 
     /// Put the hardware where this VFO wants it: on the VFO for a front end with
