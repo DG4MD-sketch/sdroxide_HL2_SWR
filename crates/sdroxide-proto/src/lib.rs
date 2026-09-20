@@ -1403,7 +1403,15 @@ use sdroxide_types::{
 /// so a v158 peer has no name for the three and fails to decode the state or the
 /// command carrying one — but only once NR2 is actually selected, since nothing
 /// else emits them.
-pub const PROTO_VERSION: u16 = 159;
+///
+/// v160: the CW panel is told whether the radio keys itself.
+/// [`sdroxide_types::CwStatus`] gains `rig_keys_itself`, appended last, so the
+/// panel can grey the straight key out with a reason instead of lighting it on
+/// a rig that will never hand-key (issue #495). `CwStatus` rides
+/// `DigiStatus::cw`, which is sent whenever a CW engine is running, so a v159
+/// peer reads the extra byte as the start of the next field and fails to decode
+/// every digital status.
+pub const PROTO_VERSION: u16 = 160;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]

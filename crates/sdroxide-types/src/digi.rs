@@ -563,6 +563,17 @@ pub struct CwStatus {
     /// The tone actually being copied, in Hz above the dial — the operator's
     /// pitch plus whatever the decoder's AFC has pulled to stay on the signal.
     pub tone_hz: f32,
+    /// Whether the radio is sending from its own keyer rather than from our
+    /// sidetone.
+    ///
+    /// True over the control port: the text goes to the rig and the rig times
+    /// the elements, so there is nothing between the keyboard and the air for
+    /// a hand to drive, and the straight key cannot engage. The panel needs
+    /// the answer because the operator cannot see it — the KEY button used to
+    /// light up and then key nothing, which is the whole of issue #495. False
+    /// is the ordinary case and the safe default: an SDR, or a rig on the
+    /// sound-card route, keys from the sidetone we generate.
+    pub rig_keys_itself: bool,
 }
 
 /// Live state of the RADE V1 modem.

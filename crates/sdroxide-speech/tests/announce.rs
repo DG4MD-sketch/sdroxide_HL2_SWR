@@ -653,7 +653,13 @@ fn truncate_like_the_controllers(rx_text: &mut String) {
 fn cw_status(text: &str) -> DigiStatus {
     let mut st = DigiStatus::idle(DigiConfig::default());
     st.text_rx = text.into();
-    st.cw = Some(CwStatus { locked: true, wpm: 20.0, snr_db: 10.0, tone_hz: 700.0 });
+    st.cw = Some(CwStatus {
+        locked: true,
+        wpm: 20.0,
+        snr_db: 10.0,
+        tone_hz: 700.0,
+        ..Default::default()
+    });
     st
 }
 
@@ -710,7 +716,13 @@ fn unlocked_cw_is_not_read() {
     step(&mut a, &s, 0.0);
 
     let mut st = cw_status("SOME NOISE HERE ");
-    st.cw = Some(CwStatus { locked: false, wpm: 0.0, snr_db: 0.0, tone_hz: 700.0 });
+    st.cw = Some(CwStatus {
+        locked: false,
+        wpm: 0.0,
+        snr_db: 0.0,
+        tone_hz: 700.0,
+        ..Default::default()
+    });
     a.on_digi(&st, &s, 1.0);
     a.tick(&s, None, 1.0);
     st.text_rx.push_str("MORE NOISE ");

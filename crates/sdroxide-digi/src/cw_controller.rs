@@ -481,6 +481,10 @@ impl CwController {
             wpm: self.rx.wpm(),
             snr_db: self.rx.snr_db(),
             tone_hz: self.rx.tone_hz(),
+            // What [`Self::set_straight`] refuses on, said out loud so the
+            // panel can grey the key out with a reason rather than let it be
+            // switched on and do nothing (issue #495).
+            rig_keys_itself: self.cat.is_some(),
         }
     }
 
@@ -1089,6 +1093,28 @@ mod tests {
         // Roughly the idle timeout, and certainly not immediately after the dit.
         let held_s = blocks as f32 * 480.0 / OUT_RATE as f32;
         assert!((TX_IDLE_S..TX_IDLE_S + 1.0).contains(&held_s), "held the key for {held_s:.1} s");
+    }
+
+    /// The refusal in `set_straight` has to reach the panel, or the operator
+    /// gets a KEY button that lights and keys nothing — the whole of issue
+    /// #495, reported against an IC-7610 over its LAN port.
+    #[test]
+    fn a_rig_that_keys_itself_says_so_and_refuses_the_hand_key() {
+        // Sending over the control port: the rig times the elements.
+        let mut rig = CwController::new(cfg(), 48_000.0, Some(28));
+        assert!(rig.status().cw.expect("CW status").rig_keys_itself);
+        rig.set_straight(true);
+        assert!(!rig.straight, "the hand key engaged on a rig that keys itself");
+        rig.key_down(true);
+        assert!(!rig.tx.held(), "the rig was keyed by hand through its own keyer");
+        assert!(!rig.tx_active, "a refused key asked for transmit anyway");
+
+        // The sidetone route — an SDR, or a rig on sound-card keying — is the
+        // one a hand can drive, and it must still say so.
+        let mut sdr = CwController::new(cfg(), 48_000.0, None);
+        assert!(!sdr.status().cw.expect("CW status").rig_keys_itself);
+        sdr.set_straight(true);
+        assert!(sdr.straight, "the hand key was refused on the route built for it");
     }
 
     /// The straight key is read at the engine's block, not once per 50 ms CW

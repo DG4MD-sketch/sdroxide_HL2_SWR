@@ -38,6 +38,21 @@ impl SdroxideApp {
         let rx_text = status.as_ref().map(|s| s.text_rx.clone()).unwrap_or_default();
         let my_call = status.as_ref().map(|s| s.config.my_call.clone()).unwrap_or_default();
         let on_air = self.on_air_freq_hz();
+        // Whether a hand has anything to key here — see `CwStatus`. Assumed
+        // true until the engine says otherwise, which is the SDR case and the
+        // one the default carries.
+        let hand_key_ok = !cw.rig_keys_itself;
+        // The route can change under a key that is already engaged — the
+        // operator moves CW keying back to the rig's own keyer while KEY is
+        // lit. The engine has refused it by then, so let go of the panel's
+        // half rather than sit with the transmit box locked against a key that
+        // sends nothing (issue #495). This also clears the state an older
+        // build could leave behind, where the chip lit on a rig that was never
+        // going to hand-key.
+        if !hand_key_ok && self.cw_straight {
+            self.cw_straight = false;
+            cmds.push(Command::CwStraight(false));
+        }
 
         // Header: where we are listening, what is being heard there, and how
         // fast we send.
@@ -349,23 +364,32 @@ impl SdroxideApp {
             // controller refuses to engage — but the button still shows rather
             // than silently not being there, because the operator may not know
             // their radio's answer is that of a keyer rather than a rig that
-            // can be hand-keyed through its sound card.
-            if tx_gated(ui, tx_ok, |ui| {
+            // can be hand-keyed through its sound card. Greyed out there, with
+            // the reason and the route that does work: leaving it live and
+            // letting it light was worse than not offering it at all, because
+            // the panel then locked the transmit box against a key that was
+            // never going to send anything (issue #495).
+            if tx_gated(ui, tx_ok && hand_key_ok, |ui| {
                 let on = self.cw_straight;
                 crate::chrome::chip(
                     ui,
                     on,
                     RichText::new(if on { " KEY ● " } else { " KEY " }).size(12.0).strong(),
                 )
-                .on_hover_text(
+                .on_hover_text(if hand_key_ok {
                     "Hold the Space bar as a straight key — down while it is held, up on \
                      release — instead of typing text. The transmit box is locked while it \
                      is on, and the whole keyer is handed to the key: whatever text was \
-                     queued is dropped.\n\n\
-                     An SDR keys this through its own transmit chain; a rig that keys \
-                     itself from text has nothing for a hand key to drive, so the mode \
-                     does not engage there.",
-                )
+                     queued is dropped."
+                } else {
+                    "This radio sends from its own keyer: the text goes over the control \
+                     port and the rig times the elements, so there is nothing between the \
+                     Space bar and the air for a hand to drive.\n\n\
+                     To hand-key it, set CW keying to \"Sound card (MCW)\" in \
+                     Settings → Radio. The rig is then held on a sideband and the keyer's \
+                     own sidetone is transmitted as audio, which is the route the straight \
+                     key drives."
+                })
             })
             .clicked()
             {
