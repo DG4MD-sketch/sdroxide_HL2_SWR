@@ -4196,7 +4196,7 @@ impl SdroxideApp {
             ui.label(RichText::new("CESSB").size(10.5)).on_hover_text(hover.clone());
             // The rail takes whatever height the label left it.
             ui.spacing_mut().slider_width = (ui.available_height() - 2.0).max(24.0);
-            if crate::chrome::slider(
+            if crate::chrome::slider_vertical(
                 ui,
                 Slider::new(&mut db, 0.0..=sdroxide_types::CESSB_MAX_DB)
                     .vertical()
@@ -4223,7 +4223,7 @@ impl SdroxideApp {
             let mut mic = self.state.tx.mic_gain;
             // The rail takes whatever height the label left it.
             ui.spacing_mut().slider_width = (ui.available_height() - 2.0).max(24.0);
-            if crate::chrome::slider(
+            if crate::chrome::slider_vertical(
                 ui,
                 Slider::new(&mut mic, 0.0..=1.0).vertical().show_value(false),
             )
@@ -4330,7 +4330,7 @@ impl SdroxideApp {
             ui.label(RichText::new(format!("{db:.0} dB")).size(10.5));
             // The rail takes whatever height the caption left it.
             ui.spacing_mut().slider_width = (ui.available_height() - 2.0).max(24.0);
-            if crate::chrome::slider(
+            if crate::chrome::slider_vertical(
                 ui,
                 Slider::new(&mut db, sdroxide_types::TX_AUDIO_LEVEL_MIN_DB..=0.0)
                     .vertical()
@@ -7272,7 +7272,7 @@ mod tests {
                             ui.spacing_mut().item_spacing.y = 2.0;
                             ui.label(RichText::new("Mic").size(10.5));
                             ui.spacing_mut().slider_width = 45.0;
-                            crate::chrome::slider(
+                            crate::chrome::slider_vertical(
                                 ui,
                                 Slider::new(&mut mic, 0.0..=1.0).vertical().show_value(false),
                             );
@@ -7291,7 +7291,7 @@ mod tests {
                             ui.spacing_mut().item_spacing.y = 2.0;
                             ui.label(RichText::new(format!("{db:.0} dB")).size(10.5));
                             ui.spacing_mut().slider_width = 45.0;
-                            crate::chrome::slider(
+                            crate::chrome::slider_vertical(
                                 ui,
                                 Slider::new(&mut db, sdroxide_types::TX_AUDIO_LEVEL_MIN_DB..=0.0)
                                     .vertical()
@@ -7311,7 +7311,7 @@ mod tests {
                             ui.spacing_mut().item_spacing.y = 2.0;
                             ui.label(RichText::new("CESSB").size(10.5));
                             ui.spacing_mut().slider_width = 45.0;
-                            crate::chrome::slider(
+                            crate::chrome::slider_vertical(
                                 ui,
                                 Slider::new(&mut cessb, 0.0..=sdroxide_types::CESSB_MAX_DB)
                                     .vertical()
