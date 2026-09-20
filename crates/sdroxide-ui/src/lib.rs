@@ -19,6 +19,7 @@ pub mod chrome;
 mod colormap;
 mod digi_map;
 mod download;
+mod hfdl_map;
 /// Running eframe on our own winit loop, so a Wayland session does not spin.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod event_loop;

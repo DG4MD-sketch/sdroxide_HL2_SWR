@@ -1384,7 +1384,13 @@ impl SdroxideApp {
                 RadioEvent::Vdl2Status(st) => self.vdl2_status = Some(st),
                 RadioEvent::AisStatus(st) => self.ais_status = Some(st),
                 RadioEvent::Qo100Status(st) => self.qo100_status = Some(st),
-                RadioEvent::HfdlStatus(st) => self.hfdl_status = Some(st),
+                RadioEvent::HfdlStatus(st) => {
+                    // Feed the map's plot table before the log scrolls anything
+                    // out of its rolling window: the table keeps an aircraft
+                    // until thirty minutes of silence retires it.
+                    self.hfdl_map.observe(&st.log, crate::time::now_unix());
+                    self.hfdl_status = Some(st);
+                }
                 RadioEvent::SstvStatus(s) => {
                     // Adopt a *newly* detected RX mode for the next transmit, but
                     // don't re-apply a steady detection every frame — that would

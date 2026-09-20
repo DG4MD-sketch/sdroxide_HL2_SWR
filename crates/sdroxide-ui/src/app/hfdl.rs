@@ -9,6 +9,11 @@
 //! edited as a copy and diffed at the end — the same apply-by-diff convention
 //! the AIS and ADS-B windows keep, because the engine echoes the accepted
 //! config back and the two copies would otherwise drift.
+//!
+//! The window is split: the decode log on the left, and the aircraft map on the
+//! right — every position a downlink has carried, kept per aircraft by
+//! [`crate::hfdl_map`]. The divider is the same draggable handle the ADS-B
+//! panel uses, and where it sits is remembered with the rest of the view state.
 
 use eframe::egui::{self, RichText};
 use sdroxide_types::{Command, HfdlDecode, HfdlStatus};
@@ -49,12 +54,13 @@ const HFDL_PLAN_KHZ: &[u32] = &[
     21_940,
 ];
 
-/// The HFDL window: run switch, channel, and the decode log.
+/// The HFDL window: run switch, channel, and the split decode log / aircraft map.
 impl SdroxideApp {
     pub(in crate::app) fn hfdl_window(&mut self, ctx: &egui::Context, cmds: &mut Vec<Command>) {
         if !self.show_hfdl {
             return;
         }
+        let now = crate::time::now_unix();
         let mut open = self.show_hfdl;
         // Edited as a copy and diffed at the end, the way the AIS window does: the
         // engine echoes the accepted settings back, so there is no apply step and
@@ -65,11 +71,11 @@ impl SdroxideApp {
             .open(&mut open)
             .frame(crate::chrome::window_frame())
             .resizable(true)
-            .default_width(crate::layout::window_w(ctx, 480.0))
-            .default_height(crate::layout::window_h(ctx, 420.0))
+            .default_width(crate::layout::window_w(ctx, 760.0))
+            .default_height(crate::layout::window_h(ctx, 460.0))
             .show(ctx, |ui| {
                 crate::chrome::window_body_bg(ui);
-                hfdl_status_strip(ui, self.hfdl_status.as_ref());
+                hfdl_status_strip(ui, self.hfdl_status.as_ref(), self.hfdl_map.len());
                 ui.add_space(4.0);
 
                 ui.horizontal(|ui| {
@@ -122,32 +128,28 @@ impl SdroxideApp {
                 });
 
                 ui.separator();
-                ui.label(
-                    RichText::new("DECODES")
-                        .size(9.5)
-                        .strong()
-                        .color(crate::theme::CYAN_DIM()),
-                );
-                // The log is carried whole in every status snapshot, oldest *last*.
-                let log =
-                    self.hfdl_status.as_ref().map(|s| s.log.as_slice()).unwrap_or(&[]);
-                egui::ScrollArea::vertical()
-                    .id_salt("hfdl-log")
-                    .auto_shrink([false, false])
-                    .max_height(ui.available_height() - 6.0)
-                    .show(ui, |ui| {
-                        if log.is_empty() {
-                            ui.label(
-                                RichText::new("Nothing decoded yet — a ground station's squitter \
-                                               repeats every ~32 s once one is in the channel.")
-                                    .size(10.5)
-                                    .color(crate::theme::gray(120)),
-                            );
-                        }
-                        for d in log.iter().rev() {
-                            hfdl_log_row(ui, d);
-                        }
-                    });
+
+                // The log keeps a draggable share of the width; the rest is the
+                // map. Floors so neither pane can be dragged away to nothing.
+                let avail_h = (ui.available_height() - 2.0).max(120.0);
+                let full_w = ui.available_width();
+                const HANDLE_W: f32 = 7.0;
+                let log_w = (full_w * self.view.hfdl_split_fraction)
+                    .clamp(220.0, (full_w - HANDLE_W - 180.0).max(220.0));
+
+                ui.horizontal_top(|ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(log_w, avail_h),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| self.hfdl_log_pane(ui, avail_h),
+                    );
+                    let h = crate::chrome::split_handle(ui, egui::vec2(HANDLE_W, avail_h), None);
+                    if h.dragged() {
+                        self.view.hfdl_split_fraction =
+                            ((log_w + h.drag_delta().x) / full_w.max(1.0)).clamp(0.15, 0.85);
+                    }
+                    ui.vertical(|ui| self.hfdl_map_pane(ui, now, avail_h));
+                });
             });
         if let Some(r) = &resp {
             crate::chrome::paint_window_border(ctx, &r.response);
@@ -157,11 +159,71 @@ impl SdroxideApp {
         }
         self.show_hfdl = open;
     }
+
+    /// The decode log, newest first, with a filter over it.
+    fn hfdl_log_pane(&mut self, ui: &mut egui::Ui, avail_h: f32) {
+        ui.horizontal_wrapped(|ui| {
+            ui.set_min_height(20.0);
+            ui.label(
+                RichText::new("DECODES")
+                    .size(10.5)
+                    .strong()
+                    .color(crate::theme::CYAN_DIM()),
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut self.hfdl_filter)
+                    .hint_text("filter")
+                    .desired_width(90.0),
+            );
+        });
+
+        let filter = self.hfdl_filter.trim().to_ascii_uppercase();
+        // The log is carried whole in every status snapshot, oldest *last*.
+        let log = self.hfdl_status.as_ref().map(|s| s.log.as_slice()).unwrap_or(&[]);
+        egui::ScrollArea::vertical()
+            .id_salt("hfdl-log")
+            .max_height((avail_h - 24.0).max(48.0))
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let mut shown = 0;
+                for d in log.iter().rev() {
+                    if !filter.is_empty() && !hfdl_matches(d, &filter) {
+                        continue;
+                    }
+                    hfdl_log_row(ui, d);
+                    shown += 1;
+                }
+                if shown == 0 {
+                    let text = if log.is_empty() {
+                        "Nothing decoded yet — a ground station's squitter repeats every \
+                         ~32 s once one is in the channel."
+                    } else {
+                        "No decode matches the filter."
+                    };
+                    ui.label(RichText::new(text).size(10.5).color(crate::theme::gray(120)));
+                }
+            });
+    }
+
+    /// The aircraft map, fed by the app's plot table.
+    fn hfdl_map_pane(&mut self, ui: &mut egui::Ui, now: i64, avail_h: f32) {
+        let home = self.hfdl_home();
+        crate::hfdl_map::show(ui, &mut self.hfdl_map, home, now, avail_h);
+    }
+
+    /// The operator's own position, from the grid in the digital-mode setup —
+    /// the same source the FT8, APRS and ADS-B maps use, so they never
+    /// disagree about where the station is.
+    fn hfdl_home(&self) -> Option<(f64, f64)> {
+        let grid = self.digi_cfg_edit.my_grid.trim();
+        (!grid.is_empty()).then(|| sdroxide_types::grid_to_latlon(grid)).flatten()
+    }
 }
 
-/// The decoder's own state, as four fixed-width slots so nothing reflows the
-/// header when a number grows a digit.
-fn hfdl_status_strip(ui: &mut egui::Ui, status: Option<&HfdlStatus>) {
+/// The decoder's own state, as fixed-width slots so nothing reflows the header
+/// when a number grows a digit. The aircraft count is the map's table, not the
+/// status's: it outlives the log's rolling window.
+fn hfdl_status_strip(ui: &mut egui::Ui, status: Option<&HfdlStatus>, aircraft: usize) {
     let (running, level, bursts, decodes) = match status {
         Some(s) => (s.running, Some(s.level_dbfs), s.bursts, s.decodes),
         None => (false, None, 0, 0),
@@ -177,12 +239,14 @@ fn hfdl_status_strip(ui: &mut egui::Ui, status: Option<&HfdlStatus>) {
         _ => "— dBFS".to_string(),
     };
     slot(ui, 76.0, &level_text, crate::theme::gray(150));
-    slot(ui, 64.0, &format!("{} bursts", count(bursts)), crate::theme::CYAN());
+    slot(ui, 76.0, &format!("{} aircraft", count(aircraft as u64)), crate::theme::CYAN());
+    slot(ui, 64.0, &format!("{} bursts", count(bursts)), crate::theme::gray(150));
     slot(ui, 64.0, &format!("{} decodes", count(decodes)), crate::theme::gray(120));
 }
 
 /// One decoded event, as a row of the log: time, kind, the ground station it
-/// names, the channel and the burst's signal report.
+/// names, the channel and the burst's signal report — then the payload, which
+/// for a position record is the fix itself, and otherwise the parser's fields.
 fn hfdl_log_row(ui: &mut egui::Ui, d: &HfdlDecode) {
     ui.horizontal_wrapped(|ui| {
         ui.label(
@@ -206,23 +270,59 @@ fn hfdl_log_row(ui: &mut egui::Ui, d: &HfdlDecode) {
                     .color(if snr >= 12.0 { crate::theme::GREEN() } else { crate::theme::YELLOW() }),
             );
         }
-        if let Some(fec) = d.fec_corrected {
-            if fec > 0 {
-                ui.label(
-                    RichText::new(format!("{} fixed", count(u64::from(fec))))
-                        .size(10.5)
-                        .color(crate::theme::gray(120)),
-                );
-            }
-        }
-        if !d.details.is_empty() && d.details != "null" {
+        if let Some(fec) = d.fec_corrected.filter(|f| *f > 0) {
             ui.label(
-                RichText::new(d.details.replace('"', ""))
+                RichText::new(format!("{} fixed", count(u64::from(fec))))
+                    .size(10.5)
+                    .color(crate::theme::gray(120)),
+            );
+        }
+        // The position, where there is one, as the fix itself rather than the
+        // JSON it arrived in.
+        if let Some(fix) = &d.position {
+            ui.label(
+                RichText::new(format!("{:.4}, {:.4}", fix.lat, fix.lon))
+                    .size(10.5)
+                    .color(crate::theme::CYAN()),
+            );
+            ui.label(
+                RichText::new(fix.label())
+                    .size(10.5)
+                    .color(crate::theme::gray(150)),
+            );
+        } else if !d.details.is_empty() && d.details != "null" {
+            ui.label(
+                RichText::new(tidy_details(&d.details))
                     .size(10.0)
                     .color(crate::theme::gray(120)),
             );
         }
     });
+}
+
+/// Whether a decode matches the log's filter text: the kind, the ground station,
+/// the channel, a position aircraft's label, or the raw payload.
+fn hfdl_matches(d: &HfdlDecode, filter: &str) -> bool {
+    d.kind.to_ascii_uppercase().contains(filter)
+        || d.gs.as_deref().is_some_and(|g| g.to_ascii_uppercase().contains(filter))
+        || format!("{:.3}", d.freq_khz as f32 / 1e3).contains(filter)
+        || d.position.as_ref().is_some_and(|f| {
+            f.label().to_ascii_uppercase().contains(filter)
+                || f.icao.as_deref().is_some_and(|i| i.to_ascii_uppercase().contains(filter))
+        })
+        || d.details.to_ascii_uppercase().contains(filter)
+}
+
+/// The payload JSON made readable: no braces, no quotes, one space after each
+/// separator. The panel shows the fields xng parsed rather than pretty-printing
+/// its structure, which at a glance is noise either way.
+fn tidy_details(details: &str) -> String {
+    details
+        .trim()
+        .trim_start_matches('{')
+        .trim_end_matches('}')
+        .replace('"', "")
+        .replace(',', "  ")
 }
 
 /// A counter, short enough that it cannot outgrow its slot.
@@ -254,24 +354,10 @@ fn slot(ui: &mut egui::Ui, w: f32, text: &str, color: egui::Color32) {
     );
 }
 
-/// The window's hot-path helper is exerciseable without a window: rendering
-/// concerns belong to egui, but the row text is a pure function of the decode.
-fn decode_row(d: &HfdlDecode) -> String {
-    let mut parts = vec![crate::time::utc_clock(d.unix), d.kind.clone()];
-    if let Some(gs) = &d.gs {
-        parts.push(gs.clone());
-    }
-    parts.push(format!("{:.3}", d.freq_khz as f32 / 1e3));
-    if let Some(snr) = d.snr_db {
-        parts.push(format!("{snr:.0}"));
-    }
-    parts.join(" ")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sdroxide_types::HFDL_DEFAULT_HZ;
+    use sdroxide_types::{HFDL_DEFAULT_HZ, HfdlFix};
 
     fn dec(kind: &str, gs: Option<&str>) -> HfdlDecode {
         HfdlDecode {
@@ -283,19 +369,42 @@ mod tests {
             freq_skew_hz: None,
             fec_corrected: None,
             details: r#"{"aircraft":"A9C-DM"}"#.to_string(),
+            position: None,
         }
-    }
-
-    #[test]
-    fn row_carries_kind_then_ground_station() {
-        let row = decode_row(&dec("squitter", Some("Riverhead (GS 4)")));
-        assert!(row.contains("squitter"));
-        assert!(row.contains("Riverhead (GS 4)"));
-        assert!(row.starts_with(&crate::time::utc_clock(1_700_000_000)));
     }
 
     #[test]
     fn default_channel_is_in_the_plan() {
         assert!(HFDL_PLAN_KHZ.contains(&(HFDL_DEFAULT_HZ as u32 / 1000)));
+    }
+
+    #[test]
+    fn the_filter_matches_kind_station_and_payload() {
+        let d = dec("squitter", Some("Riverhead (GS 4)"));
+        assert!(hfdl_matches(&d, "SQUIT"));
+        assert!(hfdl_matches(&d, "RIVERHEAD"));
+        assert!(hfdl_matches(&d, "A9C-DM"), "the payload details match too");
+        assert!(!hfdl_matches(&d, "POSITION"));
+    }
+
+    #[test]
+    fn the_filter_matches_a_position_aircraft() {
+        let mut d = dec("performance-data", None);
+        d.details = "{}".into();
+        d.position = Some(HfdlFix {
+            lat: 40.88,
+            lon: -72.64,
+            aircraft_id: Some(0x42),
+            icao: Some("040087".into()),
+            flight: Some("BAW123".into()),
+        });
+        assert!(hfdl_matches(&d, "BAW123"), "by flight");
+        assert!(hfdl_matches(&d, "040087"), "by ICAO");
+        assert!(!hfdl_matches(&d, "KLM"));
+    }
+
+    #[test]
+    fn details_are_tidied_for_the_row() {
+        assert_eq!(tidy_details(r#"{"gs_id":4,"lpdus":3}"#), "gs_id:4  lpdus:3");
     }
 }

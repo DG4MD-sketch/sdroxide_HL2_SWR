@@ -179,6 +179,10 @@ pub struct ViewState {
     /// ...and of its height given to the detail card, while one is open.
     #[serde(default = "ais_card_default")]
     pub ais_card_fraction: f32,
+    /// Fraction of the HFDL window's width given to the decode log; the rest is
+    /// the aircraft map. User-draggable.
+    #[serde(default = "hfdl_split_default")]
+    pub hfdl_split_fraction: f32,
     /// Fraction of the QSO area's height given to the world map; the rest is the
     /// station card + transcript + buttons. User-draggable.
     ///
@@ -561,6 +565,7 @@ impl Default for ViewState {
             adsb_card_fraction: adsb_card_default(),
             ais_split_fraction: ais_split_default(),
             ais_card_fraction: ais_card_default(),
+            hfdl_split_fraction: hfdl_split_default(),
             digi_map_fraction: 0.6,
             digi_pane: 0,
             sstv_tx_fraction: 0.38,
@@ -755,6 +760,13 @@ fn ais_split_default() -> f32 {
 /// sign, an IMO number, dimensions, a draught, a destination and an ETA.
 fn ais_card_default() -> f32 {
     0.45
+}
+
+/// Default for [`ViewState::hfdl_split_fraction`]. The decode log has the room
+/// on the left: a row carries a timestamp, a kind, a ground station and the
+/// payload, where the map holds only a square and a flight number per aircraft.
+fn hfdl_split_default() -> f32 {
+    0.5
 }
 
 /// Default for [`ViewState::js8_split_fraction`].

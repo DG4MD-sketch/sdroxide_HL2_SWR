@@ -20,7 +20,7 @@ use std::thread::JoinHandle;
 
 use crossbeam_channel::{Receiver, Sender, bounded, select, unbounded};
 use sdroxide_dsp::Complex32;
-use sdroxide_types::{HFDL_LOG_DEPTH, HfdlDecode, HfdlSettings, HfdlStatus};
+use sdroxide_types::{HFDL_LOG_DEPTH, HfdlDecode, HfdlFix, HfdlSettings, HfdlStatus};
 use xng_mode_hfdl::HfdlChannelDecoder;
 use xng_mode_hfdl::pdu::{HfdlEvent, gs_name};
 
@@ -179,7 +179,31 @@ fn mk_decode(cfg: &HfdlSettings, e: &HfdlEvent, unix: i64) -> HfdlDecode {
         freq_skew_hz: e.freq_skew_hz,
         fec_corrected: e.fec_corrected,
         details: serde_json::to_string(&e.details).unwrap_or_default(),
+        position: fix_of(e),
     }
+}
+
+/// The aircraft fix an event carried, if it carried one — xng's normalized
+/// `details.position` object (see `HfdlFix`). Absent for every kind that is
+/// not a performance-data or frequency-data record, and for a
+/// position-bearing record whose fix was the all-zero placeholder (xng drops
+/// that one before it reaches here).
+fn fix_of(e: &HfdlEvent) -> Option<HfdlFix> {
+    let p = e.details.get("position")?;
+    let lat = p.get("lat")?.as_f64()?;
+    let lon = p.get("lon")?.as_f64()?;
+    Some(HfdlFix {
+        lat,
+        lon,
+        aircraft_id: p.get("aircraft_id").and_then(|v| v.as_u64()).map(|v| v as u32),
+        icao: p.get("icao").and_then(|v| v.as_str()).map(str::to_owned),
+        flight: p
+            .get("flight")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned),
+    })
 }
 
 impl Drop for HfdlController {
@@ -228,6 +252,76 @@ mod tests {
                 Complex32::new(a, b)
             })
             .collect()
+    }
+
+    fn event(kind: &str, details: serde_json::Value) -> HfdlEvent {
+        HfdlEvent {
+            kind: kind.to_string(),
+            details,
+            acars: None,
+            fec_corrected: None,
+            freq_skew_hz: None,
+            snr_db: None,
+            raw: Vec::new(),
+        }
+    }
+
+    /// A position-bearing record: xng's normalized `details.position` lifts out
+    /// into the typed fix the panel and the map read.
+    #[test]
+    fn a_position_record_lifts_out_a_typed_fix() {
+        let e = event(
+            "performance-data",
+            serde_json::json!({
+                "position": {
+                    "lat": 40.88, "lon": -72.64, "aircraft_id": 0x42,
+                    "icao": "040087", "flight": "BAW123"
+                }
+            }),
+        );
+        let f = fix_of(&e).expect("a fix");
+        assert!((f.lat - 40.88).abs() < 1e-9);
+        assert!((f.lon + 72.64).abs() < 1e-9);
+        assert_eq!(f.aircraft_id, Some(0x42));
+        assert_eq!(f.icao.as_deref(), Some("040087"));
+        assert_eq!(f.flight.as_deref(), Some("BAW123"));
+        assert_eq!(f.label(), "BAW123");
+        assert_eq!(f.key(), "icao:040087");
+    }
+
+    /// Everything that is not a position record — and a record whose fix xng
+    /// dropped as the all-zero placeholder — carries no fix.
+    #[test]
+    fn a_record_without_a_position_lifts_nothing() {
+        assert!(fix_of(&event("squitter", serde_json::json!({ "gs_id": 4 }))).is_none());
+        assert!(
+            fix_of(&event(
+                "frequency-data",
+                serde_json::json!({ "gs_id": 4, "position": serde_json::Value::Null }),
+            ))
+            .is_none()
+        );
+    }
+
+    /// The key prefers the ICAO, then the alias, then the flight, then the
+    /// position — so an aircraft that resolves its ICAO keeps one plot.
+    #[test]
+    fn the_fix_key_uses_the_most_stable_identity() {
+        let base = HfdlFix {
+            lat: 1.0,
+            lon: 2.0,
+            aircraft_id: Some(7),
+            icao: None,
+            flight: Some("KLM1".into()),
+        };
+        assert_eq!(base.key(), "ac:7");
+        assert_eq!(base.label(), "KLM1");
+        let resolved = HfdlFix { icao: Some("484123".into()), ..base.clone() };
+        assert_eq!(resolved.key(), "icao:484123");
+        assert_eq!(resolved.label(), "KLM1");
+        let bare = HfdlFix { aircraft_id: None, flight: None, ..base };
+        assert_eq!(bare.key(), "pos:1.00,2.00");
+        assert_eq!(bare.label(), "#?");
     }
 
     #[test]

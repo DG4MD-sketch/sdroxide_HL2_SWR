@@ -47,6 +47,62 @@ impl Default for HfdlSettings {
     }
 }
 
+/// One aircraft position an HFDL downlink carried.
+///
+/// The normalized object xng lifts out of a performance-data (0xD1) or
+/// frequency-data (0xD5) HFNPDU: a 20-bit lat/lon pair and whatever identity
+/// the payload held — the GS-local downlink alias, and the ICAO address when
+/// the logon-confirm cache resolved the alias to one. The all-zero
+/// not-yet-acquired fix is dropped upstream, so a `Some` here is a real
+/// position.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HfdlFix {
+    pub lat: f64,
+    pub lon: f64,
+    /// The GS-local downlink alias (8-bit). *Not* the ICAO address.
+    pub aircraft_id: Option<u32>,
+    /// The ICAO address, when the logon-confirm cache resolved the alias.
+    pub icao: Option<String>,
+    /// The flight identifier the payload carried, when it carried one.
+    pub flight: Option<String>,
+}
+
+impl HfdlFix {
+    /// The identity the map keys an aircraft by: the ICAO when it is known,
+    /// else the GS-local alias, else the flight — most stable first, so an
+    /// aircraft that resolves its ICAO mid-session keeps one plot rather than
+    /// splitting into two.
+    pub fn key(&self) -> String {
+        if let Some(icao) = self.icao.as_deref().filter(|s| !s.is_empty()) {
+            return format!("icao:{icao}");
+        }
+        if let Some(id) = self.aircraft_id {
+            return format!("ac:{id}");
+        }
+        if let Some(flt) = self.flight.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            return format!("flt:{flt}");
+        }
+        // No identity at all (an un-resolved downlink): key by the rounded
+        // position so the fix still plots, even if it cannot be followed.
+        format!("pos:{:.2},{:.2}", self.lat, self.lon)
+    }
+
+    /// What the map labels the aircraft: the flight, then the ICAO, then the
+    /// alias, and a bare `#?` when the payload named nothing.
+    pub fn label(&self) -> String {
+        if let Some(flt) = self.flight.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            return flt.to_string();
+        }
+        if let Some(icao) = self.icao.as_deref().filter(|s| !s.is_empty()) {
+            return icao.to_string();
+        }
+        match self.aircraft_id {
+            Some(id) => format!("#{id}"),
+            None => "#?".to_string(),
+        }
+    }
+}
+
 /// One decoded HFDL event, as it appears in the panel's log.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HfdlDecode {
@@ -71,6 +127,11 @@ pub struct HfdlDecode {
     /// surfaced for the kind (aircraft id, position, UTC, ground station id,
     /// frequencies in use, ...).
     pub details: String,
+    /// The aircraft position this event carried, where it carried one. Both
+    /// the performance-data and frequency-data records do; squitters, logons
+    /// and the rest do not. Lifted out of [`Self::details`] so the panel and
+    /// the map need not parse JSON. Appended last: the wire is positional.
+    pub position: Option<HfdlFix>,
 }
 
 /// What the engine tells the window about the decoder's own state. Re-sent

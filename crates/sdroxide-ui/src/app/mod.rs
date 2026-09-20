@@ -443,6 +443,13 @@ pub struct SdroxideApp {
     /// Whether the HFDL window is open. The decoder's work does not care: it
     /// runs off the config on the engine side, like the ISM one.
     show_hfdl: bool,
+    /// HFDL: the aircraft plot table and the map's pan/zoom and selection. Its
+    /// own table rather than the decode log's, so an aircraft stays on the map
+    /// after its earliest decodes have scrolled out of the log.
+    hfdl_map: crate::hfdl_map::HfdlMapState,
+    /// HFDL: filter for the decode log; matches a kind, a ground station or the
+    /// payload details.
+    hfdl_filter: String,
     show_settings: bool,
     /// Scroll the Settings window back to its tab bar on the frame it opens.
     /// The window's scroll offset is egui memory, which outlives both the
@@ -1345,6 +1352,8 @@ impl SdroxideApp {
             qo100_status: None,
             hfdl_status: None,
             show_hfdl: false,
+            hfdl_map: crate::hfdl_map::HfdlMapState::default(),
+            hfdl_filter: String::new(),
             show_settings: false,
             settings_scroll_top: true,
             voice: sdroxide_types::VoiceStatus::default(),
