@@ -1426,7 +1426,10 @@ pub(in crate::app) fn settings_hpsdr_tab(
              directional coupler and an attenuator have to put a sample of the amplifier's \
              output into an input the T/R switch does not take away on transmit. On a \
              Hermes-Lite 2 that means the IO board's PureSignal jack, and the receive input \
-             above set to match. With nothing coupled in, the loop never locks and the \
+             above set to match; on a board without one, an ANAN's RX port or an external relay \
+             that switches the coupler in for the length of the over. It is this receiver that \
+             is read — a board with a second ADC cannot use RX2 as the feedback tap, however \
+             its own firmware routes it. With nothing coupled in, the loop never locks and the \
              transmitter is left exactly as it would have been. Applies on Apply / reconnect, \
              and only on the radio that owns the transmitter (DDC1).",
         );

@@ -254,7 +254,8 @@ pub fn hover_text(meters: Option<&Meters>) -> String {
                  the feedback path (best match {:.2}), so the transmitter is going out \
                  uncorrected. Check that a sample of the amplifier's output really reaches a \
                  receive input the T/R switch does not take away on transmit, and that its \
-                 attenuator is not swallowing it.",
+                 attenuator is not swallowing it. The loop listens on this receiver only — a \
+                 coupler wired to a second receiver (RX2, ADC2) is never read as the feedback.",
                 ps.score,
             ));
         }

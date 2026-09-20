@@ -179,12 +179,21 @@ impl HpsdrSource {
             );
         }
         if puresignal.is_some() {
+            // Where the sample has to arrive depends on the board. Sending the
+            // operator of a Hermes, an ANAN or a Red Pitaya after a
+            // Hermes-Lite 2's IO board gives them nowhere to look.
+            let wiring = if board.has_io_board() {
+                "on a Hermes-Lite 2 that is the IO board's PureSignal input, with the IO board's                  receive input set to match"
+            } else {
+                "this board has no IO board to switch it in, so the coupler and its attenuator                  have to reach a receive input the T/R switch does not take away on transmit —                  an ANAN's RX port, or an external relay that switches the coupler into the                  receive input for the length of the over"
+            };
             tracing::info!(
-                "HPSDR: PureSignal is on — the receiver is the feedback path, so a coupled \
-                 sample of the transmitter has to reach it during the over (on a Hermes-Lite 2 \
-                 that is the IO board's PureSignal input). {} table steps, feedback decimated \
-                 by {}. Until the loop locks the transmitter is left exactly as it would have \
-                 been.",
+                "HPSDR: PureSignal is on — this receiver, the first one, is the feedback path, \
+                 so a coupled sample of the transmitter has to reach it during the over \
+                 ({wiring}). A second receiver is never read as the feedback: a coupler wired \
+                 to RX2/ADC2 cannot lock the loop however the board's own firmware routes it \
+                 (issue #510). {} table steps, feedback decimated by {}. Until the loop locks \
+                 the transmitter is left exactly as it would have been.",
                 cfg.ps_bins,
                 ps_decim.as_ref().map_or(1, |d| d.factor())
             );
