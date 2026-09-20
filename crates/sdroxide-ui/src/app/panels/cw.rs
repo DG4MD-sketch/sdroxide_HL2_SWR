@@ -523,6 +523,7 @@ impl SdroxideApp {
                      transceiver that keys itself from text, where every hand-off to its \
                      keyer is another transmit-receive cycle.",
                 );
+                self.msg_edit_chip(ui);
             });
         });
         self.cw_macro_row(ui, cmds, tx_ok, &my_call);
@@ -553,7 +554,26 @@ impl SdroxideApp {
         ctx.input_mut(|i| i.events.retain(|e| !is_straight_key_event(e, &chords)));
     }
 
-    /// The operator's own message buttons, and the chip that edits them.
+    /// The chip that opens the message editor. It lives with the other sending
+    /// controls, next to SIDETONE and SEND ON RETURN, rather than on the
+    /// message row below: it makes the buttons that row carries, and the row
+    /// itself is the operator's doing — buttons that exist rather than the
+    /// machinery that makes them.
+    fn msg_edit_chip(&mut self, ui: &mut egui::Ui) {
+        if crate::chrome::chip(ui, self.cw_macro_edit, "MSG")
+            .on_hover_text(
+                "Your own message buttons — a contest exchange, a name-and-QTH reply, \
+                 TNX 73 GL. Each sends its whole text in one go, and F1–F9 press the \
+                 first nine. They travel with the station's configuration, so a \
+                 remote client has them too.",
+            )
+            .clicked()
+        {
+            self.cw_macro_edit = !self.cw_macro_edit;
+        }
+    }
+
+    /// The operator's own message buttons.
     ///
     /// Each one sends its whole text in a single message rather than keying it
     /// as if it had been typed, which is the point of them on a radio that keys
@@ -617,19 +637,6 @@ impl SdroxideApp {
                     fire = Some(i);
                 }
             }
-            crate::chrome::row_tail(ui, |ui| {
-                if crate::chrome::chip(ui, self.cw_macro_edit, "MSG")
-                    .on_hover_text(
-                        "Your own message buttons — a contest exchange, a name-and-QTH reply, \
-                         TNX 73 GL. Each sends its whole text in one go, and F1–F9 press the \
-                         first nine. They travel with the station's configuration, so a \
-                         remote client has them too.",
-                    )
-                    .clicked()
-                {
-                    self.cw_macro_edit = !self.cw_macro_edit;
-                }
-            });
         });
         if let Some(m) = fire.and_then(|i| macros.get(i)) {
             let call = if my_call.is_empty() { "NOCALL" } else { my_call };
