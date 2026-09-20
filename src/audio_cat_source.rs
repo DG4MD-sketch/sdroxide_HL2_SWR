@@ -363,8 +363,14 @@ impl AudioCatSource {
     /// skipped. Opening the port resets the radio on the common board — the
     /// CH340's DTR is wired to its reset — and a radio part way through boot
     /// answers nothing, so the query would only ever report a dead link for a
-    /// perfectly good one. The control thread adopts the dial on its first poll
-    /// a second or so later instead.
+    /// perfectly good one.
+    ///
+    /// Nothing adopts the radio's own dial afterwards either: this mode reads
+    /// nothing at all, because a CAT frame written into the running stream
+    /// kills it (see `trusdx::TrUsdx::poll_requests`). So the dial below is
+    /// where the band starts rather than where the radio is, and the first
+    /// tune from here is what puts the two in step. The settings note says as
+    /// much: in this mode the radio is driven from sdroxide, not followed.
     fn open_streamed(cfg: CatConfig) -> anyhow::Result<Self> {
         let cat = sdroxide_cat::spawn(cfg.clone());
         let signal_max_age = sdroxide_cat::signal_max_age(&cfg);
@@ -396,6 +402,8 @@ impl AudioCatSource {
             cat,
             scope_full_scale: 160.0,
             cw_mcw: cfg.cw_keying == sdroxide_types::CwKeying::Audio,
+            // Where the band starts, not where the radio is — nothing reads
+            // the radio's dial in this mode. The first tune commands it.
             dial: Dial::at(14_074_000.0),
             // The dial is commandable: `FA` is one of the commands this
             // firmware answers. Treated as reachable from the start rather than
