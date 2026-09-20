@@ -135,7 +135,7 @@ fn decode_sample_capture_through_the_demod() {
     };
     let mut stream = child.stdout.take().expect("xz stdout");
 
-    let mut demod = HdDemod::new(CU8_RATE);
+    let mut demod = HdDemod::new(CU8_RATE, Mode::Fm);
     let mut bytes = vec![0u8; 1 << 16];
     let mut iq = Vec::new();
     let mut audio = Vec::new();

@@ -35,6 +35,7 @@ use std::time::Duration;
 use num_complex::Complex32;
 use sdroxide_dsp::Demodulator;
 use sdroxide_nrsc5::HdDemod;
+use sdroxide_nrsc5::Mode;
 use sdroxide_nrsc5::demod::FM_RATE_HZ;
 
 const TAPS: usize = 255;
@@ -73,7 +74,7 @@ fn main() {
     // The programme is selected once the station has announced it: the demod
     // ignores a programme the multiplex has not listed, and before the first
     // station information arrives it has listed none but HD-1.
-    let mut demod = HdDemod::new(chan_rate);
+    let mut demod = HdDemod::new(chan_rate, Mode::Fm);
 
     // Windowed-sinc low-pass, flat to the 200 kHz the digital sidebands reach,
     // down by `chan_rate / 2` where the decimated band folds, with the cutoff

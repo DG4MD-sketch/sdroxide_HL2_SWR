@@ -49,6 +49,31 @@ pub enum Mode {
     Am = 1,
 }
 
+impl Mode {
+    /// The rate the decoder's input pipe runs at, in samples per second — the
+    /// rate the channel is resampled to before it is fed in.
+    pub fn native_rate_hz(self) -> f64 {
+        match self {
+            Mode::Fm => 744_187.5,
+            Mode::Am => 46_511.71875,
+        }
+    }
+
+    /// The narrowest channel this mode can be fed.
+    ///
+    /// The FM hybrid's digital sidebands reach 198.4 kHz either side of the
+    /// carrier, so a channel under twice that cannot hold them. The AM-band
+    /// variant's sidebands reach about 15 kHz, so it wants a far narrower
+    /// stream — and would be drowned in medium-wave noise by the FM window
+    /// (issue #489).
+    pub fn min_channel_rate_hz(self) -> f64 {
+        match self {
+            Mode::Fm => 400_000.0,
+            Mode::Am => 30_000.0,
+        }
+    }
+}
+
 /// A decoded event from the HD Radio receive path.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
