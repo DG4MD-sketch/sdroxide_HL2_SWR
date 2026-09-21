@@ -1419,7 +1419,23 @@ use sdroxide_types::{
 /// appended decoders caused, and the same fix (the two sides must run in
 /// lockstep). The live decode log is engine-side only
 /// (`RadioEvent::HfdlStatus`), bridged nowhere.
-pub const PROTO_VERSION: u16 = 161;
+///
+/// v162: two CW conveniences from the same report (issue #495).
+/// `DigiConfig::cw_sidetone` plays the keyed tone through the local speakers so
+/// a `Sound card (MCW)` operator hears what they are sending, and
+/// `DigiConfig::cw_tx_idle_s` makes the transmit-hold after the last character
+/// or key release configurable. Both appended to `DigiConfig`'s tail, and
+/// `DigiConfig` rides `Command::SetDigiConfig` and `DigiStatus` whole, so a
+/// v161 peer reads the extra bytes as the start of the next field and fails to
+/// decode every digital status.
+///
+/// v163: the CW straight key's self-decode, `CwStatus::sent_text` — what the
+/// operator's own keying decoded to, so the straight key shows its characters
+/// the way the text keyer shows typed ones (issue #495 follow-up). Appended to
+/// `CwStatus`'s tail, after `rig_keys_itself`; `CwStatus` rides inside
+/// `DigiStatus`, which crosses whole, so a v162 peer reads the extra bytes as
+/// the start of the next field and fails to decode every digital status.
+pub const PROTO_VERSION: u16 = 163;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]

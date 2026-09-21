@@ -551,7 +551,7 @@ pub struct QsoLive {
 }
 
 /// Live state of the CW decoder.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct CwStatus {
     /// The decoder is copying: its timing fit is good and holding steady.
     pub locked: bool,
@@ -574,6 +574,11 @@ pub struct CwStatus {
     /// is the ordinary case and the safe default: an SDR, or a rig on the
     /// sound-card route, keys from the sidetone we generate.
     pub rig_keys_itself: bool,
+    /// What the straight key decoded of *our own* sending, so the operator can
+    /// see the characters their hand produced. Empty in every other mode and
+    /// whenever the key has not been used.
+    #[serde(default)]
+    pub sent_text: String,
 }
 
 /// Live state of the RADE V1 modem.
@@ -2096,6 +2101,29 @@ pub struct DigiConfig {
     /// [`SstvStyle`].
     #[serde(default)]
     pub sstv_style: SstvStyle,
+    /// CW: play the keyed sidetone through the local speakers as well as
+    /// sending it, so the operator hears what they are sending.
+    ///
+    /// Every other mode gets its feedback another way — the transmitted signal
+    /// is off the air, and a receiver that is not muted during the over lets
+    /// the operator hear it. On `Sound card (MCW)` the keyed tone goes to the
+    /// rig's sound card and nowhere else, so without this the operator sends in
+    /// silence. On by default; turn it off where the rig's own monitor or an
+    /// off-air copy already does the job, so the two do not double.
+    #[serde(default = "yes")]
+    pub cw_sidetone: bool,
+    /// CW: how long transmit is held after the last character or key release
+    /// before the carrier drops, in seconds. The idle between characters is
+    /// what makes typing feel like sending, and it is what a straight key
+    /// rests on between elements — but it has to end somewhere, and five
+    /// seconds is a long time to sit on an empty frequency. 0 drops transmit
+    /// as soon as the queue drains (subject to the straight key's hold).
+    #[serde(default = "cw_default_tx_idle_s")]
+    pub cw_tx_idle_s: f32,
+}
+
+fn cw_default_tx_idle_s() -> f32 {
+    5.0
 }
 
 fn wspr_default_power() -> i16 {
@@ -2278,6 +2306,8 @@ impl Default for DigiConfig {
             wspr_hop_bands: wspr_default_hop_bands(),
             wspr_upload: true,
             sstv_style: SstvStyle::default(),
+            cw_sidetone: true,
+            cw_tx_idle_s: 5.0,
         }
     }
 }

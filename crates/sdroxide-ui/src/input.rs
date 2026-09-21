@@ -401,6 +401,11 @@ pub(crate) fn apply_action(
         MemoryRecall(n) => cmds.push(Command::RecallMemory(n)),
         RecordToggle => cmds.push(Command::SetRecording(!state.recording)),
         AbortTx => cmds.push(Command::DigiAbortTx),
+        // The CW straight key is read held by the CW panel, not dispatched
+        // here: it is a held state with its own focus rules, and the panel is
+        // the only place that knows whether the mode is armed. The binding
+        // table is what makes the key selectable.
+        CwStraight => {}
         // The engine decides whether this can transmit: an empty slot, a
         // digital mode other than RADE, or TUNE in progress all make it a
         // no-op there, which is where the keyer's state actually lives.
@@ -536,6 +541,18 @@ impl InputRuntime {
 
     pub fn persist(&self) {
         persist_input_settings(&self.cfg);
+    }
+
+    /// The chords bound to the CW straight key, in binding order. The CW panel
+    /// reads their *held* state and swallows their events; the binding table is
+    /// what lets the operator choose a key whose travel suits keying.
+    pub(crate) fn cw_straight_chords(&self) -> Vec<KeyChord> {
+        self.cfg
+            .keys
+            .iter()
+            .filter(|b| b.enabled && b.action == Action::CwStraight && !b.chord.is_empty())
+            .map(|b| b.chord.clone())
+            .collect()
     }
 
     /// Throw away any queued MIDI events. A radio tab that is not focused

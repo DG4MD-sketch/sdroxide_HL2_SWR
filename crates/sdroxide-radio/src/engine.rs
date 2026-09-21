@@ -1662,6 +1662,11 @@ struct TxChain {
 
 /// 10 ms of TX audio per iteration.
 const TX_AUDIO_BLOCK: usize = 480;
+/// Cap on the queued CW sidetone monitor, in samples — a second at 48 kHz.
+/// Bounds the queue if the speaker path stalls; the operator's own sending is
+/// at most a character or two ahead of what is playing.
+const CW_MONITOR_CAP: usize = 48_000;
+
 /// The loudest a microphone may be over a whole voice over and still count as
 /// silent — about 60 dB below full scale, which is quieter than the noise floor
 /// of any sound card anyone transmits through.
@@ -2551,6 +2556,18 @@ struct Engine {
     voice_prev_rate: f64,
     /// The monitored block handed to whichever speaker path is in use.
     voice_prev_out: Vec<f32>,
+    /// CW sidetone monitor: the keyed tone copied for the local speakers, at
+    /// the digi TX rate (48 kHz), resampled to the output rate and drained as
+    /// the speaker path asks. Empty unless CW is sending with the monitor on
+    /// (`DigiConfig::cw_sidetone`), so it costs nothing on any other mode.
+    cw_monitor_q: Vec<f32>,
+    cw_monitor_rs: Option<MonoResampler>,
+    cw_monitor_rate: f64,
+    cw_monitor_out: Vec<f32>,
+    /// One-shot diagnostic: warned once that the monitor queue is filling
+    /// faster than the speaker drains it (device unhooked or wedged). Cleared
+    /// again when a drain does serve audio.
+    cw_monitor_warned: bool,
     /// When the current keyer over was requested, so one that never reached the
     /// air (the transmit rails refused, a digital-voice burst was aborted)
     /// releases the keyer instead of leaving it stuck "transmitting".
@@ -4026,6 +4043,11 @@ fn engine_thread(
         voice_prev_rs: None,
         voice_prev_rate: 0.0,
         voice_prev_out: Vec::new(),
+        cw_monitor_q: Vec::new(),
+        cw_monitor_rs: None,
+        cw_monitor_rate: 0.0,
+        cw_monitor_out: Vec::new(),
+        cw_monitor_warned: false,
         voice_started: None,
         voice_tick: None,
         tx_pace: None,
@@ -5691,6 +5713,17 @@ impl Engine {
             self.audio_play_rec.clear();
             if want_rec {
                 self.audio_play_rec.extend_from_slice(&self.voice_play);
+            }
+        } else if self.take_cw_monitor(self.audio_out_rate, block) {
+            // The keyed CW sidetone takes the speakers, so an MCW operator
+            // hears what they are sending even though the tone went out to the
+            // rig and not to a monitor. Silence between elements, exactly as a
+            // sidetone is.
+            self.audio_play.clear();
+            self.audio_play.extend_from_slice(&self.cw_monitor_out);
+            self.audio_play_rec.clear();
+            if want_rec {
+                self.audio_play_rec.extend_from_slice(&self.cw_monitor_out);
             }
         } else if self.mutes_analog_audio() {
             self.audio_play.fill(0.0);
@@ -15807,6 +15840,85 @@ impl Engine {
         self.emit_voice_status();
     }
 
+    /// Drain the queued CW sidetone into `cw_monitor_out`, resampling from the
+    /// 48 kHz it is generated at to the speaker's rate. Returns false when
+    /// nothing is queued, so the caller leaves the received audio alone.
+    fn take_cw_monitor(&mut self, out_rate: f64, n: usize) -> bool {
+        if n == 0 || self.cw_monitor_q.is_empty() {
+            return false;
+        }
+        if (out_rate - self.cw_monitor_rate).abs() > 0.01 {
+            self.cw_monitor_rate = out_rate;
+            self.cw_monitor_rs = MonoResampler::new(TX_MONITOR_RATE, out_rate);
+        }
+        let rx0 = &self.state.rx[0];
+        // The operator's own volume control, as for any other audio.
+        let vol = if rx0.muted { 0.0 } else { rx0.volume };
+        let mut ready = Vec::new();
+        match self.cw_monitor_rs.as_mut() {
+            Some(rs) => rs.push(&self.cw_monitor_q, &mut ready),
+            None => ready.extend_from_slice(&self.cw_monitor_q),
+        }
+        self.cw_monitor_warned = false;
+        self.cw_monitor_q.clear();
+        self.cw_monitor_out.clear();
+        let take = ready.len().min(n);
+        self.cw_monitor_out.extend(ready[..take].iter().map(|s| s * vol));
+        // The tail of the block: silence, so the output stays paced.
+        self.cw_monitor_out.resize(n, 0.0);
+        true
+    }
+
+    /// Whether the receiver keeps being read — and so the queued CW monitor
+    /// drained — while the transmitter is keyed. That is only ever true of a
+    /// full-duplex I/Q source: [`Self::poll`] skips the receiver read inside a
+    /// TX over unless `caps.full_duplex` and the audio is not already
+    /// demodulated (`!audio_mode`), so every sound-card and half-duplex path
+    /// spends the over deaf. Where this is false the sidetone is played live
+    /// from the TX loop instead of queued — see [`Self::play_cw_sidetone`].
+    fn cw_monitor_drained_during_tx(&self) -> bool {
+        self.caps.full_duplex && !self.audio_mode
+    }
+
+    /// Play one block of CW sidetone to the speakers, live from the transmit
+    /// loop. The queue normally serves it on the receiver-driven speaker path;
+    /// where the receiver is not read during TX (see
+    /// [`Self::cw_monitor_drained_during_tx`]) the tone would otherwise pile
+    /// into `cw_monitor_q` and then burst out as a single short beep when the
+    /// over ends — exactly what an MCW operator hears as "the sidetone took a
+    /// few seconds, then a blip". Fed the same 48 kHz samples that go to the
+    /// radio (post the modem's own level), resampled to the speaker's rate and
+    /// scaled by the receiver's own volume, as the queued path scales them.
+    fn play_cw_sidetone(&mut self, audio: &[f32]) {
+        if self.cw_monitor_drained_during_tx()
+            || !self.digi_config.cw_sidetone
+            || self.digi.as_ref().is_none_or(|d| d.mode() != Mode::Cw)
+        {
+            return;
+        }
+        if (self.audio_out_rate - self.cw_monitor_rate).abs() > 0.01 {
+            self.cw_monitor_rate = self.audio_out_rate;
+            self.cw_monitor_rs = MonoResampler::new(TX_MONITOR_RATE, self.audio_out_rate);
+        }
+        let mut ready = Vec::new();
+        match self.cw_monitor_rs.as_mut() {
+            Some(rs) => rs.push(audio, &mut ready),
+            None => ready.extend_from_slice(audio),
+        }
+        let rx0 = &self.state.rx[0];
+        let vol = if rx0.muted { 0.0 } else { rx0.volume };
+        let mono: Vec<f32> = if vol != 1.0 {
+            ready.iter().map(|s| s * vol).collect()
+        } else {
+            ready
+        };
+        let want_rec = self.recorder.is_some();
+        let rec: Vec<f32> = if want_rec { mono.clone() } else { Vec::new() };
+        if let Some(mixer) = self.mixer.as_mut() {
+            mixer.push(&mono, None, &rec, None);
+        }
+    }
+
     /// Feed a recording from the microphone, and end a keyer over once its
     /// message has played out. Called once per engine iteration.
     fn poll_voice(&mut self) {
@@ -16037,6 +16149,41 @@ impl Engine {
         if (gain - 1.0).abs() > f32::EPSILON {
             for a in out.iter_mut() {
                 *a = (*a * gain).clamp(-1.0, 1.0);
+            }
+        }
+        // CW: keep a copy of the keyed sidetone for the local speakers, so a
+        // `Sound card (MCW)` operator hears what they are sending. The samples
+        // are the same ones going to the radio, at 48 kHz; the speaker path
+        // drains them at its own rate (see `take_cw_monitor`). Only while
+        // transmitting, so the queue is empty on every other mode and between
+        // overs.
+        //
+        // Gated on the engine actually sending CW — `DigiEngine::mode()` — and
+        // not on what the rig happens to be reporting: MCW commands the digi
+        // sideband, so the radio's mode can read as something else while the
+        // keyer is the one producing this audio (and the CW controller is only
+        // ever built for `Mode::Cw`), and the sidetone must follow the thing
+        // being sent, not the rig's echo of it.
+        //
+        // ...and queued only where the queue gets drained. The speaker path
+        // that drains it runs off the receiver, and the main loop does not read
+        // the receiver during TX except on a full-duplex I/Q source; everywhere
+        // else the tone is played block-by-block from the TX loop instead
+        // (`play_cw_sidetone`), so nothing is left to spoil and burst later.
+        if self.digi_config.cw_sidetone
+            && self.cw_monitor_drained_during_tx()
+            && self.digi.as_ref().is_some_and(|d| d.mode() == Mode::Cw)
+        {
+            let room = CW_MONITOR_CAP.saturating_sub(self.cw_monitor_q.len());
+            if room > 0 {
+                self.cw_monitor_q.extend_from_slice(&out[..room.min(out.len())]);
+            } else if !self.cw_monitor_warned {
+                self.cw_monitor_warned = true;
+                warn!(
+                    "CW sidetone monitor: queue full and undrained ({}) — is the speaker \
+                     output serving audio?",
+                    self.cw_monitor_q.len()
+                );
             }
         }
         done
@@ -16370,6 +16517,11 @@ impl Engine {
         // needs the engine itself.
         let mut audio = [0.0f32; TX_AUDIO_BLOCK];
         let done = self.fill_digi_tx_block(&mut audio);
+        // Where the receiver is read during the over this block is queued for
+        // the speaker path in `fill_digi_tx_block`; where it is not (a
+        // half-duplex or sound-card rig is deaf while keyed) it is played here
+        // instead, or the sidetone would sit unplayed until PTT drops.
+        self.play_cw_sidetone(&audio);
         if let Some(mixer) = self.mixer.as_mut() {
             mixer.push_tx(&audio);
         }
@@ -16461,6 +16613,12 @@ impl Engine {
             // audio and not the power register (issue #131). `tx_peak` is what
             // divides it back out, inside `fill_digi_tx_block`.
             digi_done = self.fill_digi_tx_block(&mut audio);
+            // As in `tx_block_digi`: on a rig that cannot hear itself keyed the
+            // sidetone is played from here, because the queue's speaker path
+            // only runs on received audio and the receiver is not read during
+            // the over. Where it is read, `fill_digi_tx_block` queued the block
+            // instead and this finds the digi already spoken for.
+            self.play_cw_sidetone(&audio);
         } else if self.state.tx.tune {
             // An audio-modulated rig (CAT/TCI) needs a tone to produce a carrier;
             // silence would key up with no output. On a rig with its own power
