@@ -81,7 +81,10 @@ One binary, three ways to run it:
   datalink those same aircraft exchange ACARS over, on all seven channels around
   136.8 MHz at once, with the messages and the stations sending them — and
   receive-only **ACARS** itself, the classic airband datalink, decoded from the AM
-  carrier on the shared airline channels (131.550, 131.725 MHz and friends).
+  carrier on the shared airline channels (131.550, 131.725 MHz and friends) — and
+  receive-only **HFDL**, the shortwave ground network airliners use where no VHF
+  receiver can hear them, one assigned channel at a time between 2.8 and 22 MHz,
+  with a decode log and a map of the aircraft positions it carries.
 - **Receiver** — hang AGC, draggable passband filter edges (on the spectrum and
   the waterfall), noise blanker, auto-notch, **five noise-reduction engines**
   (RNNoise, DeepFilterNet3, a libspecbleach port, a port of WDSP's NR2 and the
@@ -1528,7 +1531,7 @@ way.
 | `--freq <HZ>` | Center frequency in Hz (default: where the last session was left; `14200000` on a first run). |
 | `--rate <HZ>` | Sample rate in Hz (default: from config). |
 | `--gain <DB>` | Overall RX gain in dB (default: hardware AGC / moderate). |
-| `--mode <MODE>` | Initial mode: `USB LSB CW AM SAM NFM WFM DIGU DIGL DSB ISB SPEC FT8 FT4 FT2 PSK RTTY OLIVIA THOR FSQ HELL SSTV RIFP WEFAX RFPAINT RADE ADS-B VDL2 ACARS`. Default: the mode the last session was left in. |
+| `--mode <MODE>` | Initial mode: `USB LSB CW AM SAM NFM WFM DIGU DIGL DSB ISB SPEC FT8 FT4 FT2 PSK RTTY OLIVIA THOR FSQ HELL SSTV RIFP WEFAX RFPAINT RADE ADS-B VDL2 ACARS HFDL`. Default: the mode the last session was left in. |
 | `--antenna <NAME>` | RX antenna port, as the device names it (`LNAH`, `TX/RX`; see `--probe`). Default: the port the last session was left on. |
 | `--tx-antenna <NAME>` | TX antenna port, likewise (`BAND1`, `BAND2`). |
 | `--server` | Run as a server: HTTP web client + WebSocket streaming backend. |

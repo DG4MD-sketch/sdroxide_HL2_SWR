@@ -18,9 +18,10 @@ or connects to a remote sdroxide server.
 2. [Basic operation](#2-basic-operation)
     - [2.20 HD Radio (NRSC-5)](#220-hd-radio-nrsc-5)
     - [2.22 QO-100 beacon plugin](#222-qo-100-beacon-plugin)
-3. [Digital modes (FT8, FT4, FT2, PSK31, RTTY, Olivia, THOR, FSQ, Hellschreiber, SSTV, RIFP, weather fax, JS8, RF Paint, WSPR, packet, APRS, ADS-B, NAVTEX, ACARS, VDL2, AIS, AtCHAT NET)](#3-digital-modes)
+3. [Digital modes (FT8, FT4, FT2, PSK31, RTTY, Olivia, THOR, FSQ, Hellschreiber, SSTV, RIFP, weather fax, JS8, RF Paint, WSPR, packet, APRS, ADS-B, NAVTEX, ACARS, VDL2, AIS, HFDL, AtCHAT NET)](#3-digital-modes)
     - [3.17 AtCHAT NET](#317-atchat-net)
     - [3.18 ACARS](#318-acars-airline-datalink-on-airband)
+    - [3.19 HFDL](#319-hfdl-aircraft-on-shortwave)
 4. [Skimmers (CW, PSK, RTTY)](#4-skimmers)
 5. [ISM band decoder (315 / 345 / 433 / 868 / 915 MHz devices)](#5-ism-band-decoder)
 6. [Settings](#6-settings)
@@ -59,7 +60,10 @@ or connects to a remote sdroxide server.
   a radar display — see [§3.13](#313-ads-b-aircraft-on-1090-mhz) — and **AIS**
   does the same for the ships on 162 MHz, onto a marine chart with the vessels
   drawn as hulls pointed the way they are heading
-  ([§3.16](#316-ais-ships-on-162-mhz)). **AtCHAT NET** is a multi-station
+  ([§3.16](#316-ais-ships-on-162-mhz)). **HFDL** reaches the aircraft that no
+  VHF receiver can — the shortwave ground network airliners use over the oceans
+  and the poles, one assigned channel at a time, with a decode log and a map of
+  the positions it carries ([§3.19](#319-hfdl-aircraft-on-shortwave)). **AtCHAT NET** is a multi-station
   keyboard and file mode with dynamic master election, a shared roster, and
   block-CRC-ARQ file/image transfer alongside the chat
   ([§3.17](#317-atchat-net)).
@@ -5649,6 +5653,60 @@ ACARS (Aircraft Communications Addressing and Reporting System) is the text data
 **Receive only.** ACARS is an airline service shared with air traffic control — there is nothing here for an amateur licence to do. The mode does not transmit, and its channel chips tune the dial without touching the transmit side.
 
 ACARS is also carried over VDL2 on higher frequencies — see [3.15](#315-vdl2-what-the-aircraft-are-saying) for the datalink version.
+
+### 3.19 HFDL (aircraft on shortwave)
+
+HFDL (High Frequency Data Link, ARINC 635) is the datalink airliners use where nothing else reaches: the oceans and the poles. A handful of ground stations spread around the world transmit on assigned shortwave channels between 2.8 and 22 MHz, aircraft answer on the same channel, and the exchange carries squitters, logons, position and performance reports, frequency data, and ACARS messages riding inside it. It is slow — 300 to 1800 bits per second of PSK on a 2.8 kHz single-sideband channel — and it is the only aircraft datalink you can hear from the other side of an ocean.
+
+Choose **HFDL** from the end of the **DIGITAL** row, or press the **HFDL** chip in the System box. The panel docks under the waterfall: the decode log on the left, an aircraft map on the right, with a draggable divider between them that is remembered with the rest of the layout.
+
+**One channel at a time, and you choose which.** This is the difference between HFDL and the other aircraft lanes. ADS-B has exactly one frequency and AIS and VDL2 cover all of their channels at once, because theirs sit next to each other. HFDL's do not — they are scattered across the whole shortwave spectrum — so the decoder listens to one 24 kHz lane and the frequency is yours to pick.
+
+| Control | What it does |
+| --- | --- |
+| **LISTEN** | Switches the decoder on and off. It costs a downconverter and a worker thread whether the panel is on screen or not, so it starts off, and it is off again next time you start sdroxide. |
+| The kHz field | The channel to listen on. Anything from 2 800 to 30 000 kHz. |
+| The frequency chips | The published assigned frequencies, one click each. **21.931 M** — Riverhead, covering the northern Atlantic and North America — is the default. |
+
+Changing the channel moves the dial with it, so the panadapter shows the signal the decoder is working on. The channel frequency is the *assigned* frequency, which is where the suppressed carrier of the upper-sideband channel sits; the decoder finds its own subcarrier 1440 Hz above that, so put the assigned frequency on the dial and do not offset it by hand.
+
+#### What you need
+
+**An HF antenna and a receiver that hands over raw I/Q.** HFDL rides its own downconversion of the I/Q stream, like ADS-B, AIS, VDL2 and the QO-100 beacon, so it needs a wideband front end — an RSP, an Airspy HF+, an RX-888, a KiwiSDR, a directly-connected SDR of any kind. A transceiver driven over CAT with its audio on a sound card hands sdroxide demodulated audio and no I/Q to mix a lane out of, and the decoder cannot run on it. The **LISTEN** switch turns itself off on such a radio rather than pretending.
+
+**The right band for the time of day.** This is ordinary shortwave propagation and it matters more than anything in the panel. The higher channels — 17 and 21 MHz — are daytime paths; 5, 6 and 8 MHz are the night ones; 11 and 13 MHz work around the changes. A channel that is dead is usually dead because the band is closed, not because the decoder is failing.
+
+#### What you see
+
+The strip along the top of the panel:
+
+| Readout | What it is |
+| --- | --- |
+| **RUNNING** / **OFF** | Whether the decoder is switched on. |
+| dBFS | The level in the lane. It moves with band noise even when nothing is decoding, which is how you know the lane is actually fed. |
+| aircraft | How many aeroplanes are on the map. |
+| bursts | Blocks of the channel in which the demodulator found a transmission. |
+| decodes | Messages that came out of them whole. |
+
+Below that, the log, newest first: the time (UTC), what kind of record it is, the ground station that sent it where one is named, the channel, the burst's signal-to-noise figure and how many symbols the error correction had to repair, and then the payload — the position itself where the record carried one, and otherwise the fields the parser recovered. The filter box above matches on any of those, so typing `SQUITTER`, a ground station name or a flight number narrows the list to it.
+
+**A squitter every 32 seconds is the first thing to look for.** Each ground station announces itself on its own schedule whether or not any aircraft are talking to it, so a channel that is open gives you something to see within a minute of switching **LISTEN** on. Aircraft traffic is much rarer than that.
+
+#### The aircraft map
+
+Every position an aircraft has sent, over the same dotted continents the FT8, ADS-B and AIS maps use. Drag to pan, scroll to zoom, click a square to select it; the view eases to fit what it is holding. Your own station is placed from the grid square in the digital-mode setup, the same one those other maps use.
+
+**It is not ADS-B and it does not look like it.** A position arrives only when an aircraft sends a performance-data or frequency-data record — minutes apart at best, not twice a second — and the record carries latitude and longitude and nothing else. There is no altitude, no speed and no heading in it, so there is no leader line and no aeroplane symbol pointed anywhere: just a square, the flight number beside it, and the plot moved in place as later fixes arrive. An aircraft is dropped from the map after half an hour with nothing new, which is far longer than one stays in range of a single ground station.
+
+Where an aircraft is labelled by a number rather than a flight, the ground station had given it a short local alias and the logon that would resolve it to an ICAO address had not been heard. Catch that logon later in the session and the plot keeps its identity rather than splitting in two.
+
+**Receive only.** HFDL is an airline and air-traffic service. There is no transmit half of this panel, and there never will be.
+
+#### How far this has been proven
+
+The demodulator, the error correction and the message parser come from [`airframesio/xng`](https://github.com/airframesio/xng) (MIT/Apache-2.0), vendored at a pinned revision under `vendor/xng`. The whole chain — lane, worker, log — was validated off air against a recorded 21 931 kHz capture, which it decodes into a Riverhead squitter.
+
+It has **not** been watched working against live aircraft traffic. That capture carried a ground station and no aircraft position, so the map and the identity handling are tested against constructed records rather than against the air. Expect the ground-station side to behave and treat the aircraft side as new.
 
 ## 4. Skimmers
 
@@ -15601,6 +15659,7 @@ using. Bind them under **Speech** on the Controls tab:
 | VDL2 | The VHF datalink aircraft exchange ACARS over, on fourteen channels between 136.650 and 136.975 MHz at once: a message log and the stations sending them. Receive only. See [3.15](#315-vdl2-what-the-aircraft-are-saying). |
 | AIS | Ship reporting on the two channels either side of 162.000 MHz at once: a vessel list and a marine chart with hulls drawn to their heading, time-based trails and speed vectors. Receive only. See [3.16](#316-ais-ships-on-162-mhz). |
 | ACARS | Airline datalink on VHF airband, decoded off the AM carrier: aircraft registrations, labels and message text, every message block-checked. Receive only. See [3.18](#318-acars-airline-datalink-on-airband). |
+| HFDL | The shortwave aircraft datalink, one assigned channel at a time between 2.8 and 22 MHz: a decode log of what the ground network is saying and a map of the aircraft positions it carries. Receive only. See [3.19](#319-hfdl-aircraft-on-shortwave). |
 | ATCHAT | AtCHAT NET — a 2.7 kHz COFDM multi-station keyboard and file mode: dynamic master election, a shared roster, common and directed chat, and block-CRC-ARQ file/image transfer. See [3.17](#317-atchat-net). |
 
 ### Bands
