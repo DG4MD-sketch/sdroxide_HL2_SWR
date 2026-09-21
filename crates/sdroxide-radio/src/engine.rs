@@ -2563,6 +2563,15 @@ struct Engine {
     cw_monitor_q: Vec<f32>,
     cw_monitor_rs: Option<MonoResampler>,
     cw_monitor_rate: f64,
+    /// Resampled and waiting for the speaker, drained from the front a block at
+    /// a time. Separate from `cw_monitor_q` because the two ends do not deal in
+    /// the same samples: the transmit loop pushes 10 ms of 48 kHz, the speaker
+    /// path asks for whatever its own block is at its own rate, and a resampler
+    /// hands back a ragged count either way. Holding the remainder here is what
+    /// makes a dit survive a block boundary — thrown away instead, the tone is
+    /// cut wherever the two cadences disagree, which is a click in the middle
+    /// of an element rather than a shorter one.
+    cw_monitor_ready: std::collections::VecDeque<f32>,
     cw_monitor_out: Vec<f32>,
     /// One-shot diagnostic: warned once that the monitor queue is filling
     /// faster than the speaker drains it (device unhooked or wedged). Cleared
@@ -4044,6 +4053,7 @@ fn engine_thread(
         voice_prev_rate: 0.0,
         voice_prev_out: Vec::new(),
         cw_monitor_q: Vec::new(),
+        cw_monitor_ready: std::collections::VecDeque::new(),
         cw_monitor_rs: None,
         cw_monitor_rate: 0.0,
         cw_monitor_out: Vec::new(),
@@ -15842,30 +15852,36 @@ impl Engine {
 
     /// Drain the queued CW sidetone into `cw_monitor_out`, resampling from the
     /// 48 kHz it is generated at to the speaker's rate. Returns false when
-    /// nothing is queued, so the caller leaves the received audio alone.
+    /// nothing is waiting, so the caller leaves the received audio alone.
+    ///
+    /// Whatever the resampler hands back beyond this block stays in
+    /// `cw_monitor_ready` for the next one. The transmit loop and the speaker
+    /// path do not run in step — different block sizes, different rates, and a
+    /// resampler that returns a ragged count — so a drain that kept only one
+    /// block's worth would cut the tone wherever the two cadences disagreed,
+    /// once per block, in the middle of an element. It is also what
+    /// [`CW_MONITOR_CAP`] is for: a cap on a queue nothing ever carried over
+    /// would be a cap on nothing.
     fn take_cw_monitor(&mut self, out_rate: f64, n: usize) -> bool {
-        if n == 0 || self.cw_monitor_q.is_empty() {
+        if n == 0 || (self.cw_monitor_q.is_empty() && self.cw_monitor_ready.is_empty()) {
             return false;
         }
         if (out_rate - self.cw_monitor_rate).abs() > 0.01 {
             self.cw_monitor_rate = out_rate;
             self.cw_monitor_rs = MonoResampler::new(TX_MONITOR_RATE, out_rate);
+            // The old rate's tail would play at the wrong speed.
+            self.cw_monitor_ready.clear();
         }
+        queue_cw_monitor(
+            self.cw_monitor_rs.as_mut(),
+            &mut self.cw_monitor_q,
+            &mut self.cw_monitor_ready,
+        );
         let rx0 = &self.state.rx[0];
         // The operator's own volume control, as for any other audio.
         let vol = if rx0.muted { 0.0 } else { rx0.volume };
-        let mut ready = Vec::new();
-        match self.cw_monitor_rs.as_mut() {
-            Some(rs) => rs.push(&self.cw_monitor_q, &mut ready),
-            None => ready.extend_from_slice(&self.cw_monitor_q),
-        }
         self.cw_monitor_warned = false;
-        self.cw_monitor_q.clear();
-        self.cw_monitor_out.clear();
-        let take = ready.len().min(n);
-        self.cw_monitor_out.extend(ready[..take].iter().map(|s| s * vol));
-        // The tail of the block: silence, so the output stays paced.
-        self.cw_monitor_out.resize(n, 0.0);
+        drain_cw_monitor(&mut self.cw_monitor_ready, &mut self.cw_monitor_out, n, vol);
         true
     }
 
@@ -17057,6 +17073,49 @@ fn describe_ranges(ranges: &[(f64, f64)]) -> String {
 /// The underlying rig mode class a `Mode` commands over CAT/TCI (USB/LSB/CW/
 /// AM/FM). Digital/data modes ride on a sideband, so a rig reporting that plain
 /// sideband must not be mistaken for the operator leaving the digital mode.
+/// Resample everything the transmit loop has left in `pending` to the speaker's
+/// rate and put it on the back of `ready`, capped at [`CW_MONITOR_CAP`].
+///
+/// The cap is for a speaker path that has stopped serving audio at all (device
+/// unhooked or wedged): the oldest goes rather than the queue growing without
+/// bound, because the operator's own sending is only ever a character or two
+/// ahead of what is playing and an older backlog than that is of no use to
+/// anyone.
+fn queue_cw_monitor(
+    rs: Option<&mut MonoResampler>,
+    pending: &mut Vec<f32>,
+    ready: &mut std::collections::VecDeque<f32>,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    let mut out = Vec::new();
+    match rs {
+        Some(rs) => rs.push(pending, &mut out),
+        None => out.extend_from_slice(pending),
+    }
+    pending.clear();
+    ready.extend(out);
+    while ready.len() > CW_MONITOR_CAP {
+        ready.pop_front();
+    }
+}
+
+/// Take one speaker block off the front of `ready`, at the operator's volume,
+/// padded to `n` with silence. What is left stays for the next block: see
+/// [`Engine::take_cw_monitor`].
+fn drain_cw_monitor(
+    ready: &mut std::collections::VecDeque<f32>,
+    out: &mut Vec<f32>,
+    n: usize,
+    vol: f32,
+) {
+    out.clear();
+    let take = ready.len().min(n);
+    out.extend(ready.drain(..take).map(|s| s * vol));
+    out.resize(n, 0.0);
+}
+
 fn rig_mode_class(m: Mode) -> u8 {
     match m {
         Mode::Lsb | Mode::Digl => 0,
@@ -19205,5 +19264,81 @@ mod tci_pace_tests {
         }
         p.rekey();
         assert_eq!(p.request(0, 0, true), Some((TCI_TX_LEAD + TX_AUDIO_BLOCK) as u32));
+    }
+}
+
+#[cfg(test)]
+mod cw_monitor_tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    /// The sidetone survives block boundaries.
+    ///
+    /// The transmit loop pushes 10 ms of 48 kHz at a time and the speaker asks
+    /// for its own block at its own rate; the two counts do not match, and the
+    /// first cut of this kept one block and threw the rest away. That is not a
+    /// shorter tone — it is a gap punched in the middle of every element, once
+    /// per block, which an operator hears as a rattle rather than a dit.
+    #[test]
+    fn the_queue_carries_the_remainder_between_blocks() {
+        let mut pending = Vec::new();
+        let mut ready: VecDeque<f32> = VecDeque::new();
+        let mut out = Vec::new();
+        // No resampler: the speaker is already at the transmit rate, so what
+        // goes in is exactly what must come out and the arithmetic is the
+        // property rather than the resampler's.
+        let mut served = Vec::new();
+        for block in 0..8 {
+            pending.extend((0..480).map(|i| (block * 480 + i) as f32));
+            queue_cw_monitor(None, &mut pending, &mut ready);
+            // A speaker block that does *not* divide the transmit block.
+            drain_cw_monitor(&mut ready, &mut out, 128, 1.0);
+            served.extend_from_slice(&out);
+        }
+        // Everything the speaker was given, in order, is a prefix of what was
+        // keyed — nothing dropped, nothing reordered.
+        let asked: Vec<f32> = (0..served.len()).map(|i| i as f32).collect();
+        assert_eq!(served, asked, "the monitor lost or reordered samples");
+        // ...and the rest is still queued rather than gone.
+        assert_eq!(ready.len(), 8 * 480 - served.len());
+    }
+
+    /// A block longer than the queue is padded with silence, so the speaker
+    /// stays paced rather than being handed a short buffer.
+    #[test]
+    fn a_short_queue_is_padded_not_shortened() {
+        let mut ready: VecDeque<f32> = VecDeque::from(vec![1.0, 1.0, 1.0]);
+        let mut out = Vec::new();
+        drain_cw_monitor(&mut ready, &mut out, 8, 1.0);
+        assert_eq!(out, [1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        assert!(ready.is_empty());
+    }
+
+    /// The operator's volume is applied to the monitor as to anything else,
+    /// and a muted receiver silences it.
+    #[test]
+    fn the_monitor_takes_the_volume_control() {
+        let mut ready: VecDeque<f32> = VecDeque::from(vec![1.0, -1.0]);
+        let mut out = Vec::new();
+        drain_cw_monitor(&mut ready, &mut out, 2, 0.25);
+        assert_eq!(out, [0.25, -0.25]);
+        let mut ready: VecDeque<f32> = VecDeque::from(vec![1.0, -1.0]);
+        drain_cw_monitor(&mut ready, &mut out, 2, 0.0);
+        assert_eq!(out, [0.0, 0.0]);
+    }
+
+    /// A speaker path that never drains cannot grow the queue without bound:
+    /// the oldest goes, so what plays when it comes back is the newest keying
+    /// rather than a minute of backlog.
+    #[test]
+    fn a_stalled_speaker_cannot_grow_the_queue_forever() {
+        let mut pending = Vec::new();
+        let mut ready: VecDeque<f32> = VecDeque::new();
+        for block in 0..400 {
+            pending.extend((0..480).map(|i| (block * 480 + i) as f32));
+            queue_cw_monitor(None, &mut pending, &mut ready);
+        }
+        assert_eq!(ready.len(), CW_MONITOR_CAP);
+        assert_eq!(*ready.back().unwrap(), (400 * 480 - 1) as f32, "the newest is kept");
     }
 }
