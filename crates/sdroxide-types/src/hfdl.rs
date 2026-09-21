@@ -30,7 +30,7 @@ pub const HFDL_LANE_RATE_HZ: f64 = 24_000.0;
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct HfdlSettings {
     /// Whether the decoder runs at all. Off by default: it is a
-    /// sometimes-reached utility lane, not something `every station pays a
+    /// sometimes-reached utility lane, not something every station pays a
     /// downconverter and a worker thread for by default, the same reason
     /// [`crate::Qo100Settings::enabled`] is off.
     pub enabled: bool,
