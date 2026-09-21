@@ -515,7 +515,14 @@ impl InputRuntime {
     /// gesture, and without an immediate repaint it would wait out the app's
     /// 250 ms idle poll and feel broken.
     pub fn new(storage: Option<&dyn eframe::Storage>, ctx: &eframe::egui::Context) -> Self {
-        let cfg = load_input_settings(storage);
+        let mut cfg = load_input_settings(storage);
+        // A file saved by an older release does not have the bindings added
+        // since — and the key for one of them then does nothing, with nothing
+        // on screen to say why. Written straight back so the new binding shows
+        // in the Controls tab, and so deleting it there sticks.
+        if cfg.migrate() {
+            persist_input_settings(&cfg);
+        }
         #[cfg(not(target_arch = "wasm32"))]
         let (midi, midi_sent) = {
             let want = midi_config(&cfg);
