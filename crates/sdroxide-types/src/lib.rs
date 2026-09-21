@@ -141,6 +141,10 @@ pub use geo::{
     latlon_to_grid,
 };
 pub use hd::{HdAudioService, HdRadioStatus};
+pub use hfdl::{
+    HFDL_DEFAULT_HZ, HFDL_LANE_RATE_HZ, HFDL_LOG_DEPTH, HfdlDecode, HfdlFix, HfdlSettings,
+    HfdlStatus,
+};
 pub use input::{
     Action, ActionInput, ActionKind, BindingTuning, ButtonMode, InputSettings, KeyBinding,
     KeyChord, MidiBinding, MidiMsg, MidiMsgKind, MidiSettings, MouseButton, MouseButtonBinding,
@@ -185,10 +189,6 @@ pub use propagation::{
 };
 pub use publicsdr::{PublicSdrDirectory, PublicSdrEntry, PublicSdrNetwork};
 pub use qo100::{QO100_BEACON_HZ, Qo100Settings, Qo100Status};
-pub use hfdl::{
-    HFDL_DEFAULT_HZ, HFDL_LANE_RATE_HZ, HFDL_LOG_DEPTH, HfdlDecode, HfdlFix, HfdlSettings,
-    HfdlStatus,
-};
 pub use radio::{
     AirspyConfig, AirspyDevice, AirspyGain, AirspyHfConfig, AirspyHfDevice, AirspyHfModel, Backend,
     BandDriveTrim, CAT_IQ_DC_BLOCK_MAX_HZ, CAT_IQ_RATES, CAT_SCOPE_MIN_BAUD,

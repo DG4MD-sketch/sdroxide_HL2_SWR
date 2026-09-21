@@ -2001,7 +2001,8 @@ mod tests {
     }
 
     #[test]
-    fn rtty_on_fm_is_a_channel_not_a_sideband() {        assert!(Mode::RttyFm.is_text_modem(), "it is the RTTY modem and wants the RTTY panel");
+    fn rtty_on_fm_is_a_channel_not_a_sideband() {
+        assert!(Mode::RttyFm.is_text_modem(), "it is the RTTY modem and wants the RTTY panel");
         assert!(Mode::RttyFm.is_digital());
         assert!(Mode::RttyFm.is_fm_carrier(), "the level is deviation, not drive");
         assert!(Mode::RttyFm.is_carrier_centered(), "the dial is the channel centre");

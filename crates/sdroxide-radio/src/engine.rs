@@ -29,8 +29,8 @@ use sdroxide_dsp::{
     SpectralNr, SpectrumAnalyzer, StereoResampler, SubToneGen, ToneBurst, channel_target,
     make_demod, make_modulator,
 };
-use sdroxide_ism::{IsmAction, IsmController};
 use sdroxide_hfdl::HfdlController;
+use sdroxide_ism::{IsmAction, IsmController};
 use sdroxide_nrsc5::HdDemod;
 use sdroxide_qo100::Qo100Controller;
 use sdroxide_rigctld::{RigState, RigctldController};

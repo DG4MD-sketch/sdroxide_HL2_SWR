@@ -5232,12 +5232,7 @@ impl SdroxideApp {
     }
 
     /// The remaining window chips — the condensed System box's bottom row.
-    fn system_chips_bottom(
-        &mut self,
-        ui: &mut egui::Ui,
-        extra: f32,
-        cmds: &mut Vec<Command>,
-    ) {
+    fn system_chips_bottom(&mut self, ui: &mut egui::Ui, extra: f32, cmds: &mut Vec<Command>) {
         let [mail, mem, scan_label, hfdl_label, settings, help] = SYSTEM_CHIPS_BOTTOM;
         if chip_stretched(ui, self.mail.open, mail, extra)
             .on_hover_text("Winlink radio email")
@@ -6354,10 +6349,7 @@ fn band_mode_menu(
         // decodes and transmits, and none of these is — each has its own lane,
         // no QSO and no transmitter. They are digital signals all the same, and
         // this is where an operator looks for one.
-        for m in Mode::DIGITAL
-            .into_iter()
-            .chain([Mode::Adsb, Mode::Vdl2, Mode::Ais, Mode::Hfdl])
-        {
+        for m in Mode::DIGITAL.into_iter().chain([Mode::Adsb, Mode::Vdl2, Mode::Ais, Mode::Hfdl]) {
             if crate::chrome::chip(ui, mode == m, m.label()).clicked() {
                 cmds.push(Command::SetMode { rx: RxId::Main, mode: m });
             }

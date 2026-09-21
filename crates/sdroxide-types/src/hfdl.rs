@@ -164,13 +164,7 @@ pub struct HfdlStatus {
 
 impl Default for HfdlStatus {
     fn default() -> Self {
-        Self {
-            running: false,
-            level_dbfs: 0.0,
-            bursts: 0,
-            decodes: 0,
-            log: Vec::new(),
-        }
+        Self { running: false, level_dbfs: 0.0, bursts: 0, decodes: 0, log: Vec::new() }
     }
 }
 

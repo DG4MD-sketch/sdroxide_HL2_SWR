@@ -124,12 +124,7 @@ impl HfdlController {
                 }
             })
             .expect("spawn hfdl worker");
-        HfdlController {
-            iq_tx,
-            ctl_tx,
-            res_rx,
-            worker: Some(worker),
-        }
+        HfdlController { iq_tx, ctl_tx, res_rx, worker: Some(worker) }
     }
 
     /// Realtime path: hand a block of lane-rate I/Q to the worker. Non-blocking.
@@ -227,10 +222,7 @@ mod tests {
             .unwrap_or(0)
     }
 
-    fn wait_for(
-        c: &HfdlController,
-        pred: impl Fn(&HfdlStatus) -> bool,
-    ) -> Option<HfdlStatus> {
+    fn wait_for(c: &HfdlController, pred: impl Fn(&HfdlStatus) -> bool) -> Option<HfdlStatus> {
         let mut latest = None;
         for _ in 0..500 {
             if let Some(s) = c.poll() {
@@ -347,10 +339,12 @@ mod tests {
         let raw = std::fs::read(&path).expect("read capture");
         let samples: Vec<Complex32> = raw
             .chunks_exact(4)
-            .map(|b| Complex32::new(
-                i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0,
-                i16::from_le_bytes([b[2], b[3]]) as f32 / 32768.0,
-            ))
+            .map(|b| {
+                Complex32::new(
+                    i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0,
+                    i16::from_le_bytes([b[2], b[3]]) as f32 / 32768.0,
+                )
+            })
             .collect();
         let c = HfdlController::new(
             24_000.0,
