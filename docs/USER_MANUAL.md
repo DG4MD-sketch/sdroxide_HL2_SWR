@@ -1862,8 +1862,9 @@ you pause you can watch the sending catch up.
 
 - Typing keys the transmitter by itself; you do not have to press **TX** first.
 - **TX** holds the key down between characters so nothing you type waits. It
-  releases itself after five seconds with nothing left to send, so a transmitter
-  is never left holding the frequency.
+  releases itself once there has been nothing left to send for as long as
+  **IDLE** says — five seconds out of the box — so a transmitter is never left
+  holding the frequency.
 - **CALL CQ** loads and sends a CQ built from your callsign; **CLEAR** stops and
   drops whatever has not gone out.
 
@@ -1873,7 +1874,7 @@ pace, correct what you like, and commit it when it reads right. The line break
 is keyed as a word space; Shift+Return breaks a line without sending it; and
 **TX** commits the box the same way if you would rather press it than reach for
 Return. Transmit then releases **as soon as the line has gone out**, rather than
-after the five-second hang above — that hang is there to bridge the gaps between
+after the **IDLE** hang above — that hang is there to bridge the gaps between
 typed characters, and there are none to bridge when the line was composed before
 it was sent. The setting is shared with the keyboard modes
 ([3.3](#33-psk31-and-rtty)).
@@ -1925,6 +1926,18 @@ characters as well, or it will drop out between them however the text arrives.
 - **LOCK** — decode at your own speed instead of reading the speed off the
   signal. Worth turning on for a signal too weak for the speed search to settle
   when you already know how fast the other station sends.
+- **IDLE** — how long transmit is held after the last character, or after the
+  straight key comes up, before the carrier drops: **Off** (drop at once)
+  through 10 s, five seconds out of the box. The hang is what makes typing feel
+  like sending and what a hand key rests on between elements, but five seconds
+  is a long time to sit on a frequency that is otherwise quiet, so it is yours
+  to set.
+- **SIDETONE** — play the keyed tone through your own speakers as well as
+  sending it. On out of the box. It matters most on **Sound card (MCW)**
+  ([6.2.2](#622-cat-radios-serial-control--usb-audio)), where the tone goes to
+  the rig's sound card and nowhere else and you would otherwise send in
+  silence. Turn it off where the rig's own monitor already does the job, or the
+  two will double.
 - **NEURAL / TIMING** — which decoder copies the receive window. **NEURAL** is
   DeepCW, the default: it reads several dB further down and copes with hand
   sending that a timing fit will not accept. **TIMING** reads the keying
@@ -1936,21 +1949,35 @@ characters as well, or it will drop out between them however the text arrives.
   Esperanto letters that share their codes) and the keyer sends the code.
 
 **The keyboard as a straight key.** **KEY**, beside **TX** in the sending row,
-turns the Space bar into a hand key: the carrier is on while you hold it and off
-when you let go, and the timing is entirely yours — **WPM** and Farnsworth do
-not apply. Switching it on drops whatever the keyer still had queued, so a
-half-sent message never surfaces between your elements, and locks the transmit
-box so a space cannot type into it.
+turns a key on your keyboard into a hand key: the carrier is on while you hold
+it and off when you let go, and the timing is entirely yours — **WPM** and
+Farnsworth do not apply. Switching it on drops whatever the keyer still had
+queued, so a half-sent message never surfaces between your elements, and locks
+the transmit box so a space cannot type into it.
+
+**Which key.** The space bar, unless you say otherwise: it is the **CW straight
+key** action in Settings → Controls ([6.4.1](#641-keyboard)), so you can put it
+on any key you like. A space bar's travel is long for keying, and a key with a
+shorter throw is easier to send a decent fist on.
 
 - The first press keys the transmitter; there is no need to press **TX**. Between
   elements the transmitter holds the frequency the way **TX** does, and releases
-  itself after five seconds with the key up.
-- The Space bar is only the key while nothing on screen has the keyboard — a
+  itself once the key has been up for as long as **IDLE** says.
+- **What you send is read back to you.** The characters your hand produces are
+  decoded from the keying itself and printed where a typist sees their typed
+  text, so the straight key is not sent blind. It is a separate decoder from the
+  one copying the band — it follows *your* fist rather than the speed the
+  receive decoder is tracking — and it prints a character as soon as the gap
+  after it says the character has ended, rather than waiting to be sure. An
+  element run with no letter in the Morse table prints as `�`. **CLEAR RX**
+  empties it along with the receive window, and **CLEAR** in the sending row
+  does the same while the key is on.
+- The bound key is only the key while nothing on screen has the keyboard — a
   caret in any text field means you are typing — and only on the radio that
   holds the keyboard, so in a split view the key never reaches the radio beside
-  it. While **KEY** is on, Space is also taken from the key bindings: a
-  hold-to-talk bound to Space ([6.4.1](#641-keyboard)) does not key a carrier
-  under your hand as well.
+  it. While **KEY** is on, that key is also taken from the key bindings: a
+  hold-to-talk bound to the same key ([6.4.1](#641-keyboard)) does not key a
+  carrier under your hand as well.
 - **A key held down for 30 seconds is taken as a lost key-up** — a stuck key, a
   client that went away — rather than a hand: the carrier drops, transmit
   switches off, and a yellow **WATCHDOG** chip says why. Press the key again to
@@ -1964,7 +1991,8 @@ box so a space cannot type into it.
 
 It works wherever sdroxide makes the CW signal itself: an IQ radio, or a CAT
 radio keyed as MCW audio. A CAT radio sending text through its own keyer has
-nothing a hand key can drive, and **KEY** does nothing there.
+nothing a hand key can drive: **KEY** is greyed out there, and says so on hover
+along with the setting that changes it.
 
 > **Transmitting** on an IQ radio (SoapySDR, HPSDR, TCI, SmartSDR) is the
 > keyer building its own sideband signal. On a CAT radio the keyer transmits by
@@ -15575,7 +15603,7 @@ right.
 | V | Flip the waterfall (scroll upwards). |
 | 1 – 9, 0 (numpad) | Transmit voice-keyer slots 1–10 (nothing if the slot is empty). |
 | − (numpad) | Stop a voice-keyer message. |
-| Space (CW, with **KEY** on) | The straight key: carrier while held ([2.14](#214-cw-decoding-and-keyboard-sending)). |
+| Space (CW, with **KEY** on) | The straight key: carrier while held, and re-bindable as **CW straight key** in Settings → Controls ([2.14](#214-cw-decoding-and-keyboard-sending)). |
 | F1 | Open this manual (works even while typing). |
 
 Shortcuts are ignored while typing in a text field.
