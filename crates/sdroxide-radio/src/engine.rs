@@ -15907,11 +15907,8 @@ impl Engine {
         }
         let rx0 = &self.state.rx[0];
         let vol = if rx0.muted { 0.0 } else { rx0.volume };
-        let mono: Vec<f32> = if vol != 1.0 {
-            ready.iter().map(|s| s * vol).collect()
-        } else {
-            ready
-        };
+        let mono: Vec<f32> =
+            if vol != 1.0 { ready.iter().map(|s| s * vol).collect() } else { ready };
         let want_rec = self.recorder.is_some();
         let rec: Vec<f32> = if want_rec { mono.clone() } else { Vec::new() };
         if let Some(mixer) = self.mixer.as_mut() {

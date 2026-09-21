@@ -306,7 +306,10 @@ impl SdroxideApp {
                                         };
                                         ui.add(
                                             egui::Label::new(
-                                                RichText::new(text).monospace().size(13.0).color(color),
+                                                RichText::new(text)
+                                                    .monospace()
+                                                    .size(13.0)
+                                                    .color(color),
                                             )
                                             .wrap(),
                                         )

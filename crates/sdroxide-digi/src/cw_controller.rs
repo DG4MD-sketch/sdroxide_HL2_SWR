@@ -1345,12 +1345,15 @@ mod tests {
         c.poll(SystemTime::now(), 14_030_000.0);
         let unit_ms = 1200.0 / 18.0;
         let jit = [0.85f32, 1.1, 0.95, 1.05, 0.9, 1.15, 1.0, 0.8, 1.2, 0.92, 1.08, 0.97];
+        // One line per letter, which is the only way to read it: each pair is
+        // (mark, gap) in units, and the gaps that end a letter are the 3s.
+        #[rustfmt::skip]
         let seq: &[(u32, u32)] = &[
-            (1, 1), (3, 1), (3, 1), (1, 3), // P .-.
-            (1, 1), (3, 3), // A .-
-            (1, 1), (3, 1), (1, 3), // R .-.
-            (1, 1), (1, 3), // I ..
-            (1, 1), (1, 1), (1, 20), // S ...
+            (1, 1), (3, 1), (3, 1), (1, 3), // P .--.
+            (1, 1), (3, 3),                 // A .-
+            (1, 1), (3, 1), (1, 3),         // R .-.
+            (1, 1), (1, 3),                 // I ..
+            (1, 1), (1, 1), (1, 20),        // S ...
         ];
         let mut ji = 0usize;
         let mut peak = 0.0f32;
@@ -1624,7 +1627,8 @@ mod tests {
     /// Nothing goes out until the operator says to transmit — the panel's TX
     /// button means the same thing on both routes.
     #[test]
-    fn text_typed_out_of_transmit_waits() {        let mut c = CwController::new(cfg(), 48_000.0, Some(50));
+    fn text_typed_out_of_transmit_waits() {
+        let mut c = CwController::new(cfg(), 48_000.0, Some(50));
         let t0 = SystemTime::now();
         c.set_tx_text("CQ DE W1AW ".into());
         assert!(keyed(&c.poll(t0 + Duration::from_secs(1), 0.0)).is_empty());

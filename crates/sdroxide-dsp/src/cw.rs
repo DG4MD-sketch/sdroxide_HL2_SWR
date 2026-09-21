@@ -1351,10 +1351,7 @@ impl CwSelfRx {
                     self.flushed = true;
                     self.emitted = true;
                 }
-                if self.flushed
-                    && self.emitted
-                    && !self.spaced
-                    && self.run >= SELFRX_WORD_UNITS * u
+                if self.flushed && self.emitted && !self.spaced && self.run >= SELFRX_WORD_UNITS * u
                 {
                     out.push(' ');
                     self.spaced = true;
@@ -1377,7 +1374,6 @@ impl CwSelfRx {
         }
     }
 }
-
 
 // ─── keyed sidetone transmitter ──────────────────────────────────────────────
 
