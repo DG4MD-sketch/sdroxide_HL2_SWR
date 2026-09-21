@@ -1294,7 +1294,7 @@ mod tests {
         // The engine's next poll is what marks us on the air.
         c.poll(SystemTime::now(), 14_030_000.0);
         let mut peak = 0.0f32;
-        let mut feed = |c: &mut CwController, ms: f32, peak: &mut f32| {
+        let feed = |c: &mut CwController, ms: f32, peak: &mut f32| {
             let mut blk = [0.0f32; 480];
             for _ in 0..(ms / 10.0).round().max(0.0) as usize {
                 c.fill_tx_block(&mut blk);
@@ -1357,7 +1357,7 @@ mod tests {
         ];
         let mut ji = 0usize;
         let mut peak = 0.0f32;
-        let mut feed = |c: &mut CwController, ms: f32, peak: &mut f32| {
+        let feed = |c: &mut CwController, ms: f32, peak: &mut f32| {
             let mut blk = [0.0f32; 480];
             for _ in 0..(ms / 10.0).round().max(0.0) as usize {
                 c.fill_tx_block(&mut blk);

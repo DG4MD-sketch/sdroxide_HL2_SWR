@@ -400,7 +400,7 @@ fn fmt_age(secs: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sdroxide_types::{HfdlFix, HfdlSettings};
+    use sdroxide_types::HfdlFix;
 
     fn decode(unix: i64, fix: Option<HfdlFix>) -> HfdlDecode {
         HfdlDecode {
