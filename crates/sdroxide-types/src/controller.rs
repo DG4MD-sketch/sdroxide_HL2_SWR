@@ -326,6 +326,17 @@ pub enum RadioEvent {
     /// `IsmStatus` has one — not done yet, since every station this shipped
     /// for runs its own hardware locally.
     Qo100Status(crate::Qo100Status),
+    /// What the HFDL (ARINC 635) channel decoder has made of the tuned
+    /// channel: burst level, how many bursts carried recognized events, and
+    /// the rolling decode log (ground-station squitters, aircraft position
+    /// reports, ACARS traffic). Sent whenever it changes, the same convention
+    /// [`RadioEvent::Qo100Status`] follows — settings travel separately, in
+    /// [`crate::RadioState::hfdl`].
+    ///
+    /// Native-engine only for now, like [`RadioEvent::Qo100Status`]: bridging
+    /// this to a remote/WASM client would mean a matching variant in
+    /// `sdroxide_proto::ServerMsg` — not done yet.
+    HfdlStatus(crate::HfdlStatus),
     /// Everything the VDL Mode 2 decoder has: the message log, the station
     /// table, and what every channel of the plan is doing. A whole snapshot, a
     /// couple of times a second.

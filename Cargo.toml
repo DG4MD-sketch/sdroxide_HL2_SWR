@@ -5,7 +5,7 @@ default-members = [".", "crates/sdroxide-types", "crates/sdroxide-proto", "crate
 # The vendored crates are reached through `[patch.crates-io]`, not as members:
 # they are upstream's code under upstream's licences, not ours to lint or
 # version with the rest.
-exclude = ["vendor/soapysdr", "vendor/ewebsock"]
+exclude = ["vendor/soapysdr", "vendor/ewebsock", "vendor/xng"]
 
 [patch.crates-io]
 
@@ -142,6 +142,7 @@ sdroxide-vdl2 = { path = "crates/sdroxide-vdl2" }
 sdroxide-ais = { path = "crates/sdroxide-ais" }
 
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 num-complex = "0.4"
 rustfft = "6"
 thiserror = "2"
@@ -152,6 +153,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 postcard = { version = "1", features = ["use-std"] }
 crossbeam-channel = "0.5"
 rtrb = "0.4"
+# HFDL (ARINC 635) decode core, vendored under `vendor/xng` — a submodule pinned
+# to one commit, so the build takes no network dependency of its own. The crates
+# are not on crates.io and are reached by path (Route A, green-lit on
+# dividebysandwich/sdroxide#497). The dependency tree is modest (rustfft,
+# num-complex, chrono, serde, crc — no protobuf); `airframesio/xng` is
+# MIT/Apache-2.0 and its `PROVENANCE.md` records a clean-room derivation from
+# ICAO Annex 10 / ARINC 635.
+xng-mode-hfdl = { path = "vendor/xng/crates/xng-mode-hfdl" }
 # Pure-Rust USB — the RTL-SDR backend's only dependency. No libusb, so it needs
 # no system library on any target and ships in every build variant.
 nusb = "0.2.7"

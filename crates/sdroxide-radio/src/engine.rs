@@ -30,6 +30,7 @@ use sdroxide_dsp::{
     make_demod, make_modulator,
 };
 use sdroxide_ism::{IsmAction, IsmController};
+use sdroxide_hfdl::HfdlController;
 use sdroxide_nrsc5::HdDemod;
 use sdroxide_qo100::Qo100Controller;
 use sdroxide_rigctld::{RigState, RigctldController};
@@ -2706,6 +2707,21 @@ struct Engine {
     /// `RadioConfig::converter_offset_hz` since the tracker was switched on.
     /// Only live while `state.qo100.auto_apply` is set.
     qo100_auto: Qo100Auto,
+    /// HFDL (ARINC 635) channel decoder: a 24 kS/s downconversion centred on
+    /// the operator's chosen channel plus a worker-thread demodulator, present
+    /// only while the decoder is enabled. Same fixed-frequency shape as the
+    /// QO-100 beacon lane — retuning it is always just re-seating the mixer —
+    /// see `sync_hfdl_window`.
+    hfdl_ddc: Option<Ddc>,
+    hfdl: Option<HfdlController>,
+    hfdl_buf: Vec<Complex32>,
+    /// The stream rate `hfdl_ddc` was built to decimate — the same reason
+    /// `qo100_in_rate` exists.
+    hfdl_in_rate: f64,
+    /// The last HFDL setting the operator chose, held in step with
+    /// `state.hfdl` for symmetry with `qo100_cfg`. Nothing reads it back yet,
+    /// and it is not persisted — the same convention `qo100_cfg` follows.
+    hfdl_cfg: sdroxide_types::HfdlSettings,
     /// Open capture file for `--record-iq`, and the interleaving scratch it is
     /// written from.
     iq_rec: Option<std::io::BufWriter<std::fs::File>>,
@@ -3644,6 +3660,24 @@ fn engine_thread(
             }
             state.band = Band::containing(hz);
         }
+        // ...and HFDL, whose channel is chosen in its panel rather than by the
+        // dial: there is a plan of assigned frequencies, so the mode brings the
+        // dial onto the chosen one and the panadapter shows the signal the lane
+        // is decoding. The lane follows its own frequency, so this is a view,
+        // not the tuning.
+        if mode.is_hfdl() {
+            let hz = state.hfdl.frequency_hz;
+            info!(
+                from = state.active_freq_hz(),
+                to = hz,
+                "HFDL channel selected; tuning the dial there"
+            );
+            match state.active_vfo {
+                Vfo::A => state.vfo_a_hz = hz,
+                Vfo::B => state.vfo_b_hz = hz,
+            }
+            state.band = Band::containing(hz);
+        }
     }
     let skim_cfg = sdroxide_config::load_skimmer_config();
     state.skimmer = if audio_mode {
@@ -4040,6 +4074,12 @@ fn engine_thread(
         // `sync_qo100`'s doc for why this one is not read back from disk.
         qo100_cfg: sdroxide_types::Qo100Settings::default(),
         qo100_auto: Qo100Auto::default(),
+        hfdl_ddc: None,
+        hfdl: None,
+        hfdl_buf: Vec::new(),
+        hfdl_in_rate: 0.0,
+        // Session-scoped only, for the same reason as `qo100_cfg`.
+        hfdl_cfg: sdroxide_types::HfdlSettings::default(),
         iq_rec,
         iq_rec_buf: Vec::new(),
         iq_wav: None,
@@ -4169,6 +4209,7 @@ fn engine_thread(
         engine.sync_vdl2(); // ...and the datalink lane, likewise
         engine.sync_ais(); // ...and the shipping lane, likewise
         engine.sync_qo100(); // a no-op today: `qo100_cfg` starts disabled and is never loaded
+        engine.sync_hfdl(); // a no-op today: `hfdl_cfg` starts disabled too
     }
     // Start any enabled network spot feeds from the persisted config. The
     // operator identity comes from the digi config — one identity for the whole
@@ -4406,6 +4447,7 @@ fn engine_thread(
         engine.poll_vdl2();
         engine.poll_ais();
         engine.poll_qo100();
+        engine.poll_hfdl();
         engine.poll_scanner();
         engine.poll_tci_server();
         engine.poll_rigctld();
@@ -5283,6 +5325,16 @@ impl Engine {
                 c.on_rx_iq(&self.qo100_buf);
             }
         }
+        // ...and the HFDL channel decoder from a 24 kS/s lane centred on the
+        // operator's chosen channel. One channel per lane — HFDL stations are
+        // spread across the band, not clustered, so a window holds one.
+        if let Some(ddc) = self.hfdl_ddc.as_mut() {
+            self.hfdl_buf.clear();
+            ddc.process(iq, &mut self.hfdl_buf);
+            if let Some(c) = self.hfdl.as_ref() {
+                c.on_rx_iq(&self.hfdl_buf);
+            }
+        }
         // Feed TCI clients: the same clean tap the digital decoders use (so
         // muting or turning down sdroxide can't silence somebody's decoder),
         // resampled to the 48 kHz TCI mandates.
@@ -5771,6 +5823,7 @@ impl Engine {
                 self.sync_vdl2_window();
                 self.sync_ais_window();
                 self.sync_qo100_window();
+                self.sync_hfdl_window();
                 self.update_tuning();
                 let _ = self.event_tx.send(RadioEvent::State(self.state.clone()));
             }
@@ -6029,6 +6082,10 @@ impl Engine {
         // centre — its one target frequency never moves, so re-seating the
         // mixer is all a retune ever needs.
         self.sync_qo100_window();
+        // The HFDL window is the same fixed-frequency shape as the QO-100 one:
+        // the operator's chosen channel never moves with the band, so a retune
+        // is just re-seating the mixer.
+        self.sync_hfdl_window();
         // Re-seat the DDCs on the new centre. Without this the main receiver
         // keeps the offset it had against the old one, which is exactly how a
         // rig-initiated retune ends up demodulating somewhere the readout does
@@ -8998,6 +9055,18 @@ impl Engine {
                 }
             }
 
+            SetHfdlConfig(cfg) => {
+                self.state.hfdl = cfg;
+                // Session-scoped only, for the same reason as `qo100_cfg`
+                // (above): holding it in step keeps a source swap's behaviour
+                // predictable, and there is nothing worth persisting yet.
+                self.hfdl_cfg = cfg;
+                self.sync_hfdl();
+                if let Some(c) = self.hfdl.as_ref() {
+                    c.set_config(cfg);
+                }
+            }
+
             ReloadIsmDecoders => {
                 // Seeded here as well as at startup, so deleting the file to get
                 // the commented example back works without a restart.
@@ -10212,6 +10281,75 @@ impl Engine {
         }
 
         let _ = self.event_tx.send(RadioEvent::Qo100Status(status));
+    }
+
+    /// Whether the HFDL worker should be running at all.
+    fn hfdl_wanted(&self) -> bool {
+        self.state.hfdl.enabled
+    }
+
+    /// Construct or tear down the HFDL channel decoder, mirroring
+    /// [`Self::sync_qo100`]'s shape: a fixed-frequency lane that follows the
+    /// radio only through its mixer offset. The lane is a 24 kS/s
+    /// downconversion centred on [`HfdlSettings::frequency_hz`] — the rate the
+    /// decoder chain was validated against (see `sdroxide_hfdl`), and wide
+    /// enough to hold the whole 2.8 kHz USB channel with margin.
+    fn sync_hfdl(&mut self) {
+        // Wideband-only, for the same reason as the QO-100 lane: a CAT rig on
+        // a sound card hands over demodulated audio, not IQ to mix a
+        // downconverter from.
+        if self.audio_mode {
+            self.state.hfdl.enabled = false;
+        }
+        match (self.hfdl_wanted(), self.hfdl.is_some()) {
+            (true, false) => {
+                let mut ddc = Ddc::new(self.state.sample_rate, sdroxide_types::HFDL_LANE_RATE_HZ);
+                ddc.set_offset_hz(self.state.hfdl.frequency_hz - self.state.center_hz);
+                let out_rate = ddc.out_rate();
+                self.hfdl = Some(HfdlController::new(out_rate, self.state.hfdl));
+                self.hfdl_ddc = Some(ddc);
+                self.hfdl_in_rate = self.state.sample_rate;
+                info!(rate = out_rate, "HFDL decoder started");
+            }
+            (false, true) => {
+                self.hfdl = None;
+                self.hfdl_ddc = None;
+                self.hfdl_buf.clear();
+                info!("HFDL decoder stopped");
+            }
+            (true, true) => self.sync_hfdl_window(),
+            _ => {}
+        }
+    }
+
+    /// Re-seat the HFDL downconverter's mixer after a retune, and rebuild it
+    /// outright if the sample rate feeding it has changed — a `Ddc` bakes its
+    /// input rate and its decimation chain in at construction. The target rate
+    /// is fixed, so a retune never resizes the lane; it only moves the mixer.
+    fn sync_hfdl_window(&mut self) {
+        if self.hfdl_ddc.is_none() {
+            return;
+        }
+        let rebuild = (self.state.sample_rate - self.hfdl_in_rate).abs() >= 1.0;
+        if rebuild {
+            let mut ddc = Ddc::new(self.state.sample_rate, sdroxide_types::HFDL_LANE_RATE_HZ);
+            ddc.set_offset_hz(self.state.hfdl.frequency_hz - self.state.center_hz);
+            let out_rate = ddc.out_rate();
+            self.hfdl_ddc = Some(ddc);
+            self.hfdl_in_rate = self.state.sample_rate;
+            self.hfdl = Some(HfdlController::new(out_rate, self.state.hfdl));
+            info!(rate = out_rate, "HFDL window rebuilt");
+            return;
+        }
+        let Some(ddc) = self.hfdl_ddc.as_mut() else { return };
+        ddc.set_offset_hz(self.state.hfdl.frequency_hz - self.state.center_hz);
+    }
+
+    /// Drain the HFDL decoder's latest status and forward it.
+    fn poll_hfdl(&mut self) {
+        let Some(c) = self.hfdl.as_ref() else { return };
+        let Some(status) = c.poll() else { return };
+        let _ = self.event_tx.send(RadioEvent::HfdlStatus(status));
     }
 
     /// One pass of the tracker's closed loop: decide whether this estimate is
@@ -14768,6 +14906,7 @@ impl Engine {
             self.sync_vdl2();
             self.sync_ais();
             self.sync_qo100();
+            self.sync_hfdl();
         }
         // Re-derive the TCI streams at the new device rate and push a fresh
         // state burst, so connected clients follow the swap.
@@ -16697,6 +16836,7 @@ impl Engine {
                 self.sync_vdl2_window();
                 self.sync_ais_window();
                 self.sync_qo100_window();
+                self.sync_hfdl_window();
                 true
             }
             Err(e) => {
@@ -16805,6 +16945,7 @@ fn rig_mode_class(m: Mode) -> u8 {
         | Mode::Adsb
         | Mode::Vdl2
         | Mode::Ais
+        | Mode::Hfdl
         | Mode::HdRadio => 5,
     }
 }

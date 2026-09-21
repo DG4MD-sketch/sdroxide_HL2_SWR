@@ -429,9 +429,15 @@ impl eframe::App for SdroxideApp {
                 // is a view of nothing. The whole channel instead, which is
                 // also all there is on this band.
                 (dial - 1_500_000.0, dial + 1_500_000.0)
+            } else if mode.is_hfdl() {
+                // The lane is a fixed 24 kHz channel, and entering the mode
+                // put the dial on the chosen HFDL frequency; frame the channel
+                // with a little either side of it. The decoder reads the lane,
+                // not this view — the window is only so the operator can see
+                // the signal they are decoding.
+                (dial - 15_000.0, dial + 15_000.0)
             } else if mode.is_aprs() {
                 // APRS is deliberately *not* framed on its own channel.
-                //
                 // Every other digital mode is worked inside a sub-band, so
                 // framing that sub-band is a service. APRS is one channel on a
                 // band an operator has every reason to be watching — the
@@ -715,6 +721,8 @@ impl eframe::App for SdroxideApp {
                                     self.vdl2_panel(ui, &mut cmds, panel_h);
                                 } else if mode.is_ais() {
                                     self.ais_panel(ui, &mut cmds, panel_h);
+                                } else if mode.is_hfdl() {
+                                    self.hfdl_panel(ui, &mut cmds, panel_h);
                                 } else if mode.is_aprs() {
                                     self.aprs_panel(ui, &mut cmds, panel_h);
                                 } else if mode.is_packet() {
@@ -1383,6 +1391,13 @@ impl SdroxideApp {
                 RadioEvent::Vdl2Status(st) => self.vdl2_status = Some(st),
                 RadioEvent::AisStatus(st) => self.ais_status = Some(st),
                 RadioEvent::Qo100Status(st) => self.qo100_status = Some(st),
+                RadioEvent::HfdlStatus(st) => {
+                    // Feed the map's plot table before the log scrolls anything
+                    // out of its rolling window: the table keeps an aircraft
+                    // until thirty minutes of silence retires it.
+                    self.hfdl_map.observe(&st.log, crate::time::now_unix());
+                    self.hfdl_status = Some(st);
+                }
                 RadioEvent::SstvStatus(s) => {
                     // Adopt a *newly* detected RX mode for the next transmit, but
                     // don't re-apply a steady detection every frame — that would

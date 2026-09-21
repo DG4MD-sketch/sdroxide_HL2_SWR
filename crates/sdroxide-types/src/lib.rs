@@ -26,6 +26,7 @@ mod entity;
 mod entity_flags;
 mod geo;
 mod hd;
+mod hfdl;
 mod input;
 mod ism;
 mod js8;
@@ -184,6 +185,10 @@ pub use propagation::{
 };
 pub use publicsdr::{PublicSdrDirectory, PublicSdrEntry, PublicSdrNetwork};
 pub use qo100::{QO100_BEACON_HZ, Qo100Settings, Qo100Status};
+pub use hfdl::{
+    HFDL_DEFAULT_HZ, HFDL_LANE_RATE_HZ, HFDL_LOG_DEPTH, HfdlDecode, HfdlFix, HfdlSettings,
+    HfdlStatus,
+};
 pub use radio::{
     AirspyConfig, AirspyDevice, AirspyGain, AirspyHfConfig, AirspyHfDevice, AirspyHfModel, Backend,
     BandDriveTrim, CAT_IQ_DC_BLOCK_MAX_HZ, CAT_IQ_RATES, CAT_SCOPE_MIN_BAUD,

@@ -809,6 +809,12 @@ pub enum Command {
     /// the same convention [`Command::SetIsmConfig`] follows. Appended for
     /// the usual reason: postcard numbers variants by position.
     SetQo100Config(crate::Qo100Settings),
+    /// Whether the HFDL (ARINC 635) decoder runs, and which channel it
+    /// centres on. The engine persists this and echoes it back in
+    /// [`crate::RadioState`], so there is no apply step — the same
+    /// convention [`Command::SetQo100Config`] follows. Appended for the
+    /// usual reason: postcard numbers variants by position.
+    SetHfdlConfig(crate::HfdlSettings),
 
     /// Start (`true`) or stop (`false`) recording the receiver's raw I/Q to a
     /// WAV file (issue #217).

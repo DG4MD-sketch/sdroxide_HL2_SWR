@@ -1411,7 +1411,15 @@ use sdroxide_types::{
 /// `DigiStatus::cw`, which is sent whenever a CW engine is running, so a v159
 /// peer reads the extra byte as the start of the next field and fails to decode
 /// every digital status.
-pub const PROTO_VERSION: u16 = 160;
+///
+/// v161: the HFDL ground-network decoder's settings, [`sdroxide_types::RadioState`]
+/// gains `hfdl` (issue #497). Appended to `RadioState`'s tail, and `RadioState`
+/// crosses whole, so a v160 peer reads the extra bytes as the start of the next
+/// field and fails to decode every state — the same break `RadioState`'s other
+/// appended decoders caused, and the same fix (the two sides must run in
+/// lockstep). The live decode log is engine-side only
+/// (`RadioEvent::HfdlStatus`), bridged nowhere.
+pub const PROTO_VERSION: u16 = 161;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]
