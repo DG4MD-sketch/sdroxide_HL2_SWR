@@ -886,10 +886,21 @@ pub struct InputSettings {
     pub ptt_hold_timeout_s: f32,
     pub midi: MidiSettings,
     /// Which set of shipped defaults this file has already seen. See
-    /// [`InputSettings::SCHEMA`] and [`InputSettings::migrate`]. A file written
-    /// before the field existed reads as 0, which is what makes the first
-    /// migration run.
+    /// [`InputSettings::SCHEMA`] and [`InputSettings::migrate`].
+    ///
+    /// The field default is spelled out rather than left to the struct's
+    /// `#[serde(default)]`: that one fills a missing field from
+    /// [`InputSettings::default`], which carries the *current* schema — so a
+    /// file written before the stamp existed would read as already migrated
+    /// and the migration would never run on the only files that need it.
+    #[serde(default = "schema_before_stamps")]
     pub schema: u32,
+}
+
+/// What [`InputSettings::schema`] reads as in a file written before the field
+/// existed: nothing has been migrated into it yet.
+fn schema_before_stamps() -> u32 {
+    0
 }
 
 impl Default for InputSettings {
@@ -978,6 +989,19 @@ mod tests {
         assert_eq!(straight[0].chord, KeyChord::plain("Space"));
         assert!(straight[0].enabled);
         assert_eq!(old.schema, InputSettings::SCHEMA);
+    }
+
+    /// The real path: a file on disk with no `schema` key at all.
+    #[test]
+    fn a_file_written_before_the_stamp_existed_reads_as_schema_zero() {
+        let mut cfg = InputSettings::default();
+        cfg.keys.retain(|b| b.action != Action::CwStraight);
+        let mut v: serde_json::Value = serde_json::to_value(&cfg).unwrap();
+        v.as_object_mut().unwrap().remove("schema");
+        let mut back: InputSettings = serde_json::from_value(v).unwrap();
+        assert_eq!(back.schema, 0, "a file with no stamp must read as 0, not as current");
+        assert!(back.migrate());
+        assert!(back.keys.iter().any(|b| b.action == Action::CwStraight));
     }
 
     /// ...and only once. An operator who deletes the binding afterwards keeps
