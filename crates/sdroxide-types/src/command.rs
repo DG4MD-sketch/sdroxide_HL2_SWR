@@ -804,11 +804,22 @@ pub enum Command {
     SetAdsbConfig(crate::AdsbSettings),
 
     /// Whether the QO-100 beacon decoder runs, and how wide it searches
-    /// around [`crate::QO100_BEACON_HZ`]. The engine persists this and
-    /// echoes it back in [`crate::RadioState`], so there is no apply step —
-    /// the same convention [`Command::SetIsmConfig`] follows. Appended for
-    /// the usual reason: postcard numbers variants by position.
+    /// around [`crate::QO100_BEACON_HZ`]. The engine echoes it back in
+    /// [`crate::RadioState`], so there is no apply step and no way for the
+    /// panel's copy and the engine's to drift apart — the same convention
+    /// [`Command::SetIsmConfig`] follows.
+    ///
+    /// It is *not* written to disk, which is where the resemblance to
+    /// `SetIsmConfig` stops: that one is kept in `ism.json` and comes back
+    /// next run, while this is session-scoped and the decoder starts off
+    /// again. Deliberately — the lane costs a downconversion and a worker
+    /// thread, and a station that switched it on once should not find it
+    /// running on its own. [`Command::SetHfdlConfig`] is the other lane that
+    /// works this way.
+    ///
+    /// Appended for the usual reason: postcard numbers variants by position.
     SetQo100Config(crate::Qo100Settings),
+
     /// Whether the HFDL (ARINC 635) decoder runs, and which channel it
     /// centres on. The engine echoes it back in [`crate::RadioState`], so
     /// there is no apply step and no way for the panel's copy and the
