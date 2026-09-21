@@ -810,10 +810,14 @@ pub enum Command {
     /// the usual reason: postcard numbers variants by position.
     SetQo100Config(crate::Qo100Settings),
     /// Whether the HFDL (ARINC 635) decoder runs, and which channel it
-    /// centres on. The engine persists this and echoes it back in
-    /// [`crate::RadioState`], so there is no apply step — the same
-    /// convention [`Command::SetQo100Config`] follows. Appended for the
-    /// usual reason: postcard numbers variants by position.
+    /// centres on. The engine echoes it back in [`crate::RadioState`], so
+    /// there is no apply step and no way for the panel's copy and the
+    /// engine's to drift apart — but it is held for the session only and
+    /// never written to disk, so the decoder starts off again next run. That
+    /// is deliberate: the lane costs a downconversion and a worker thread,
+    /// and a station that switched it on once should not find it running on
+    /// its own. Appended for the usual reason: postcard numbers variants by
+    /// position.
     SetHfdlConfig(crate::HfdlSettings),
 
     /// Start (`true`) or stop (`false`) recording the receiver's raw I/Q to a
