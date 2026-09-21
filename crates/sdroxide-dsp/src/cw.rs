@@ -1346,7 +1346,12 @@ impl CwSelfRx {
                 // word space) is flushed as the gap crosses its threshold.
                 let u = self.unit();
                 if !self.flushed && !self.sym.is_empty() && self.run >= SELFRX_CHAR_UNITS * u {
-                    out.push(morse_decode(&self.sym).unwrap_or('?'));
+                    // An element run with no case in the table is shown as the
+                    // replacement glyph, not as `?`: this is a read-back of the
+                    // operator's own hand, and `?` is a character they can send
+                    // (`..--..`). Printing it for a run that did not decode
+                    // would tell them they had keyed one.
+                    out.push(morse_decode(&self.sym).unwrap_or(char::REPLACEMENT_CHARACTER));
                     self.sym.clear();
                     self.flushed = true;
                     self.emitted = true;
