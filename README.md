@@ -1531,7 +1531,7 @@ way.
 | `--freq <HZ>` | Center frequency in Hz (default: where the last session was left; `14200000` on a first run). |
 | `--rate <HZ>` | Sample rate in Hz (default: from config). |
 | `--gain <DB>` | Overall RX gain in dB (default: hardware AGC / moderate). |
-| `--mode <MODE>` | Initial mode: `USB LSB CW AM SAM NFM WFM DIGU DIGL DSB ISB SPEC FT8 FT4 FT2 PSK RTTY OLIVIA THOR FSQ HELL SSTV RIFP WEFAX RFPAINT RADE ADS-B VDL2 ACARS HFDL`. Default: the mode the last session was left in. |
+| `--mode <MODE>` | Initial mode, case-insensitive: `LSB USB CW AM SAM NFM WFM DRM ADS-B VDL2 AIS DIGU DIGL DSB ISB SPEC FT8 FT4 FT2 JS8 WSPR PSK RTTY RTTY-FM PACKET PACKET-HF APRS SSTV SSTV-FM RIFP WEFAX NAVTEX ACARS OLIVIA THOR FSQ ATCHAT HELL RFPAINT RADE HFDL`, and `"HD RADIO"` (the one name with a space in it, so it needs the quotes). Default: the mode the last session was left in. |
 | `--antenna <NAME>` | RX antenna port, as the device names it (`LNAH`, `TX/RX`; see `--probe`). Default: the port the last session was left on. |
 | `--tx-antenna <NAME>` | TX antenna port, likewise (`BAND1`, `BAND2`). |
 | `--server` | Run as a server: HTTP web client + WebSocket streaming backend. |

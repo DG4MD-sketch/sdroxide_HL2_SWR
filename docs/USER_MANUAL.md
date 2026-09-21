@@ -14126,7 +14126,7 @@ sends them.
 | `--freq <HZ>` | Center frequency in Hz (default: where the last session was left, or 14,200,000 on a first run). |
 | `--rate <HZ>` | Sample rate in Hz (default: from config). |
 | `--gain <DB>` | Overall RX gain in dB (default: hardware AGC or a moderate value). |
-| `--mode <MODE>` | Initial mode (USB, LSB, CW, AM, SAM, NFM, WFM, DIGU, DIGL, DSB, ISB, SPEC, FT8, FT4, FT2, PSK, RTTY, OLIVIA, THOR, FSQ, SSTV, RIFP, WEFAX, RFPAINT, RADE, DRM, ADS-B, VDL2, AIS). Default: the mode the last session was left in. |
+| `--mode <MODE>` | Initial mode, matched without regard to case: LSB, USB, CW, AM, SAM, NFM, WFM, DRM, HD RADIO, ADS-B, VDL2, AIS, DIGU, DIGL, DSB, ISB, SPEC, FT8, FT4, FT2, JS8, WSPR, PSK, RTTY, RTTY-FM, PACKET, PACKET-HF, APRS, SSTV, SSTV-FM, RIFP, WEFAX, NAVTEX, ACARS, OLIVIA, THOR, FSQ, ATCHAT, HELL, RFPAINT, RADE, HFDL. `HD RADIO` is the one name with a space in it, so it needs quoting on the command line: `--mode "HD RADIO"`. Default: the mode the last session was left in. |
 | `--antenna <NAME>` | RX antenna port, as the device names it (LNAH, TX/RX — `--probe` lists them). Default: the port the last session was left on, and failing that whatever the driver selects. |
 | `--tx-antenna <NAME>` | TX antenna port, likewise (BAND1, BAND2). |
 | `--server` | Run as a server (web client + WebSocket streaming backend). |

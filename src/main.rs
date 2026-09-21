@@ -80,8 +80,13 @@ struct Cli {
     #[arg(long)]
     gain: Option<f64>,
 
-    /// Initial mode (USB, LSB, CW, AM, SAM, NFM, WFM, DIGU, DIGL, DSB, ISB, SPEC, FT8,
-    /// FT4, FT2, PSK, RTTY, PACKET, APRS, ADS-B, VDL2, AIS, SSTV, RIFP, OLIVIA, THOR, FSQ)
+    /// Initial mode, matched without regard to case: LSB, USB, CW, AM, SAM, NFM,
+    /// WFM, DRM, HD RADIO, ADS-B, VDL2, AIS, DIGU, DIGL, DSB, ISB, SPEC, FT8,
+    /// FT4, FT2, JS8, WSPR, PSK, RTTY, RTTY-FM, PACKET, PACKET-HF, APRS, SSTV,
+    /// SSTV-FM, RIFP, WEFAX, NAVTEX, ACARS, OLIVIA, THOR, FSQ, ATCHAT, HELL,
+    /// RFPAINT, RADE, HFDL
+    ///
+    /// "HD RADIO" is the one name with a space in it, so it needs the quotes.
     ///
     /// Default: the mode the last session was left in.
     #[arg(long)]
