@@ -11,16 +11,20 @@
 //!
 //! `lo_guard_hz` already existed to keep the VFO away from the LO; the
 //! `SetCenter` path was the one that went around it.
+//!
+//! FM HD Radio is the exception, and the last tests here hold it to that: its
+//! digital sidebands sit well clear of the carrier, a DC spike on the carrier
+//! was measured to cost it nothing, and a guard sized from its 744 kHz channel
+//! left CTR 400 kHz short of the dial.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::Receiver;
-use sdroxide_radio::{Complex32, EngineConfig, IqSource, Result, start_engine};
+use sdroxide_radio::{AudioParams, Complex32, EngineConfig, IqSource, Result, start_engine};
 use sdroxide_types::{Command, DeviceCaps, Mode, RadioEvent, RxId, Vfo};
 
 const RATE: f64 = 2_000_000.0;
-const CENTER: f64 = 13_970_000.0;
 const VFO: f64 = 13_720_000.0;
 /// What a zero-IF front end asks for: its LO parked this far off the VFO.
 const LO_OFFSET: f64 = 500_000.0;
@@ -72,7 +76,7 @@ fn caps() -> DeviceCaps {
         label: "test".into(),
         rx_channels: 1,
         sample_rates: vec![RATE],
-        freq_ranges_rx: vec![(1_000_000.0, 60_000_000.0)],
+        freq_ranges_rx: vec![(1_000_000.0, 200_000_000.0)],
         ..DeviceCaps::default()
     }
 }
@@ -95,13 +99,31 @@ fn settled_center(rx: &Receiver<RadioEvent>, secs: f64) -> f64 {
 /// Drive an AM receiver on `VFO`, ask for `want` as the hardware centre, and
 /// report where the engine and the front end each ended up.
 fn ask_for_center(want: f64) -> (f64, f64) {
-    let landed = Arc::new(Mutex::new(CENTER));
-    let source = ZeroIf { center_hz: CENTER, landed: Arc::clone(&landed) };
-    let mut h = start_engine(Box::new(source), caps(), EngineConfig::default());
+    ask_for_center_in(Mode::Am, VFO, want)
+}
+
+/// The same for any mode and dial. The front end starts `LO_OFFSET` above the
+/// dial, where a zero-IF receiver parks it on an ordinary retune.
+fn ask_for_center_in(mode: Mode, dial: f64, want: f64) -> (f64, f64) {
+    let start = dial + LO_OFFSET;
+    let landed = Arc::new(Mutex::new(start));
+    let source = ZeroIf { center_hz: start, landed: Arc::clone(&landed) };
+    // A ring nothing reads, because without somewhere to play audio the engine
+    // never builds the main receive chain — and `lo_guard_hz` then sizes the
+    // guard from a 48 kHz fallback instead of the mode's real channel. That
+    // happens to be AM's, which is why the tests above passed without one, but
+    // it hides FM HD's 744 kHz channel and the 400 kHz guard that came of it.
+    let (producer, _consumer) = rtrb::RingBuffer::<f32>::new(48_000);
+    let cfg = EngineConfig {
+        remember_session: false,
+        audio: Some(AudioParams { producer, out_rate: 48_000.0 }),
+        ..Default::default()
+    };
+    let mut h = start_engine(Box::new(source), caps(), cfg);
     let thread = h.thread.take();
 
-    h.cmd_tx.send(Command::SetMode { rx: RxId::Main, mode: Mode::Am }).unwrap();
-    h.cmd_tx.send(Command::SetVfo { vfo: Vfo::A, hz: VFO }).unwrap();
+    h.cmd_tx.send(Command::SetMode { rx: RxId::Main, mode }).unwrap();
+    h.cmd_tx.send(Command::SetVfo { vfo: Vfo::A, hz: dial }).unwrap();
     let _ = settled_center(&h.event_rx, 0.4);
     h.cmd_tx.send(Command::SetCenter(want)).unwrap();
     let center = settled_center(&h.event_rx, 0.6);
@@ -150,4 +172,47 @@ fn a_centre_outside_the_guard_is_honoured_exactly() {
     let want = VFO + 250_000.0;
     let (center, _) = ask_for_center(want);
     assert!((center - want).abs() < 1.0, "asked for {want}, engine settled on {center}");
+}
+
+/// FM HD Radio's dial, one of the stations the exemption was measured on.
+const FM_HD_DIAL: f64 = 107_300_000.0;
+/// HD on AM, where the guard stays.
+const AM_HD_DIAL: f64 = 1_650_000.0;
+
+/// In FM HD, CTR puts the LO on the dial — exactly, and it stays there.
+///
+/// The guard is sized from the DDC channel, and FM HD's is nrsc5's 744 kHz
+/// sample rate, so on this front end it came to 400 kHz and CTR left the dial a
+/// fifth of the window below centre. Measured on air it protects nothing: the
+/// digital carriers sit at +/-129 to +/-198 kHz, the middle is analog FM that
+/// nrsc5 does not decode, and MER and CBER were unchanged with the LO on the
+/// carrier.
+///
+/// Waiting for the centre to settle is part of the test, not incidental:
+/// `keep_vfo_in_span` reads the same guard on every pass, and if it still
+/// applied it would retune the LO straight back off the carrier.
+#[test]
+fn in_fm_hd_centring_the_window_puts_the_lo_on_the_dial() {
+    let (center, lo) = ask_for_center_in(Mode::HdRadio, FM_HD_DIAL, FM_HD_DIAL);
+    assert!(
+        (center - FM_HD_DIAL).abs() < 1.0,
+        "CTR asked for the dial and the window settled {:.0} Hz off it",
+        center - FM_HD_DIAL
+    );
+    assert!(
+        (lo - FM_HD_DIAL).abs() < 1.0,
+        "the front end was left {:.0} Hz off the dial",
+        lo - FM_HD_DIAL
+    );
+}
+
+/// HD on AM keeps the guard. Its innermost digital carriers sit within a few
+/// kHz of the carrier, under the analog audio, so there is somewhere for the
+/// spike to land — and nobody has measured it the way FM HD was.
+#[test]
+fn in_am_hd_centring_the_window_still_keeps_the_lo_off_the_dial() {
+    let (center, _) = ask_for_center_in(Mode::HdRadio, AM_HD_DIAL, AM_HD_DIAL);
+    let clear = (center - AM_HD_DIAL).abs();
+    assert!(clear >= MIN_CLEARANCE, "the LO was parked {clear:.0} Hz from an AM HD carrier");
+    assert!(clear <= MAX_CLEARANCE, "the window was pushed {clear:.0} Hz from the dial");
 }
