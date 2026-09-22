@@ -3215,9 +3215,17 @@ impl SdroxideApp {
     /// Stop the MP3 recording when its "stop after" deadline passes. Runs once
     /// a frame; the deadline itself is armed by the REC popup's chips.
     pub(in crate::app) fn poll_recording_timer(&mut self, cmds: &mut Vec<Command>) {
-        let (stop_at, stop) =
-            rec_timer_tick(crate::time::now_unix(), self.recording_stop_at, self.state.recording);
-        self.recording_stop_at = stop_at;
+        // The preset rides along untouched: `rec_timer_tick` decides only
+        // whether the deadline still stands, so keeping it out of the helper
+        // keeps that decision the one pure thing it has to get right.
+        let (stop_at, stop) = rec_timer_tick(
+            crate::time::now_unix(),
+            self.recording_stop_at.map(|(at, _)| at),
+            self.state.recording,
+        );
+        if stop_at.is_none() {
+            self.recording_stop_at = None;
+        }
         if stop {
             cmds.push(Command::SetRecording(false));
         }
@@ -3302,16 +3310,19 @@ impl SdroxideApp {
             crate::chrome::menu_caption(ui, "Stop after");
             ui.horizontal_wrapped(|ui| {
                 let now = crate::time::now_unix();
-                let mut arm: Option<i64> = None;
+                let mut arm: Option<(i64, u16)> = None;
                 let mut cancel = false;
-                for minutes in [15, 30, 45, 60, 90] {
-                    let secs = i64::from(minutes) * 60;
-                    let armed = self.recording_stop_at.is_some_and(|at| at - now == secs);
+                for minutes in [15u16, 30, 45, 60, 90] {
+                    // Which chip reads as armed is the preset the operator
+                    // pressed, held for as long as the deadline stands — not
+                    // whichever preset happens to match what is left of it,
+                    // which is only its own for the first second.
+                    let armed = self.recording_stop_at.is_some_and(|(_, m)| m == minutes);
                     if crate::chrome::chip(ui, armed, format!("{minutes} min"))
                         .on_hover_text(format!("Stop the MP3 recording after {minutes} minutes"))
                         .clicked()
                     {
-                        arm = Some(now + secs);
+                        arm = Some((now + i64::from(minutes) * 60, minutes));
                     }
                 }
                 if self.recording_stop_at.is_some()
@@ -3319,14 +3330,14 @@ impl SdroxideApp {
                 {
                     cancel = true;
                 }
-                if let Some(at) = arm {
-                    self.recording_stop_at = Some(at);
+                if let Some(armed) = arm {
+                    self.recording_stop_at = Some(armed);
                     // The countdown label below has to keep being redrawn.
                     crate::repaint::schedule_ms(ui.ctx(), 1_000);
                 } else if cancel {
                     self.recording_stop_at = None;
                 }
-                if let Some(at) = self.recording_stop_at {
+                if let Some((at, _)) = self.recording_stop_at {
                     let left = (at - now).max(0);
                     ui.label(
                         RichText::new(format!("stops in {}:{:02}", left / 60, left % 60))
