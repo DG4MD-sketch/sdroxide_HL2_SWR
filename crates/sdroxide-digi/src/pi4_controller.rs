@@ -35,9 +35,16 @@ use crate::scheduler::SlotScheduler;
 const PREROLL_S: f64 = 3.0;
 
 /// Audio kept after the boundary: the 24.333 s message plus slack for
-/// [`PREROLL_S`]'s worth of search radius at the far end, well short of the
-/// CW identification that follows at 25 s — this decoder does not read that
-/// far.
+/// [`PREROLL_S`]'s worth of search radius at the far end.
+///
+/// That runs past the CW identification and unmodulated carrier the beacon
+/// sends from 25 s, so both are inside the window the decoder searches —
+/// there is no way to hold a whole late-starting message without them. They
+/// cost nothing: a keyed 800 Hz tone and a steady one are not four-tone FSK,
+/// they score nothing against the sync vector, and a candidate built from
+/// them does not survive [`crate::pi4::decode::fit_of`]. What they must not
+/// do is push the window past the next minute boundary, which is why this
+/// stops at 30 s rather than filling the cycle.
 const POSTROLL_S: f64 = 30.0;
 
 /// One window of audio handed to the decode worker.
