@@ -303,14 +303,26 @@ fn stamp_lines(
         {
             continue;
         }
-        let mut prev = project(f64::from(part.pts[0].0), f64::from(part.pts[0].1));
+        let mut prev_lon = f64::from(part.pts[0].1);
+        let mut prev = project(f64::from(part.pts[0].0), prev_lon);
         for point in &part.pts[1..] {
-            let cur = project(f64::from(point.0), f64::from(point.1));
-            // A segment that leaves the map and comes back the other side is
-            // the date line under the projection's wrap; drawn straight it
-            // would be a scar across the whole map.
+            let lon = f64::from(point.1);
+            let cur = project(f64::from(point.0), lon);
+            // A segment across the view's seam — the far side of the world,
+            // `clon ± 180°`, wherever the map has been panned to, and not the
+            // date line — comes out with its ends on opposite edges, and drawn
+            // straight it is a scar across the whole map.
+            //
+            // Recognised in longitude, where it is exact: the projection has
+            // the segment stepping 360° further than the line itself does.
+            // This used to be measured on screen, as a jump of at least one map
+            // width — but 360° is `360 / lon_span` widths, which is several
+            // zoomed in and only just under one at the whole world, so there
+            // every crossing slipped through and was drawn.
+            let drawn = wrap180(lon - clon) - wrap180(prev_lon - clon);
+            let crosses_seam = (drawn - wrap180(lon - prev_lon)).abs() > 180.0;
             let (dx, dy) = (cur.0 - prev.0, cur.1 - prev.1);
-            if dx.abs() < cols as f64 {
+            if !crosses_seam {
                 // Step along it half a cell at a time — half, so a diagonal
                 // leaves no gaps at the corners.
                 let steps = (dx.abs().max(dy.abs()) * 2.0).ceil().max(1.0);
@@ -325,6 +337,7 @@ fn stamp_lines(
                 }
             }
             prev = cur;
+            prev_lon = lon;
         }
     }
 }
@@ -879,6 +892,39 @@ mod tests {
         for row in 0..rows {
             let filled = marks[row * cols..(row + 1) * cols].iter().filter(|m| **m != 0).count();
             assert!(filled * 3 < cols, "row {row} is {filled}/{cols} wide — a wrap scar");
+        }
+    }
+
+    /// The seam is wherever the view puts the far side of the world —
+    /// `clon ± 180°` — not the date line. The border data is already split at
+    /// ±180°, so a map centred on Greenwich hides the problem: pan it and the
+    /// seam lands in Asia, where hundreds of borders and rivers cross it.
+    ///
+    /// The whole world is the case that matters, because it is where the seam
+    /// jump is smallest. A segment across the seam steps 360° of longitude, which
+    /// is `360 / lon_span` map widths: six at a 60° zoom and trivially spotted,
+    /// but only just under one at 360°, where it was being drawn straight across.
+    #[test]
+    fn nothing_is_drawn_across_the_seam_wherever_the_map_is_panned() {
+        let (cols, rows) = (200usize, 100usize);
+        let lines = crate::basemap::lines();
+        for clon in (-180..180).step_by(15) {
+            for (name, layer) in [("borders", &lines.borders), ("rivers", &lines.rivers)] {
+                let mut marks = vec![0u8; cols * rows];
+                let view = (0.0, f64::from(clon), 360.0, 180.0);
+                stamp_lines(layer, view, (cols, rows), &mut marks);
+                for row in 0..rows {
+                    // A scar is one long unbroken run; a real line is short. The
+                    // longest straight border drawn is the 49th parallel, 28° of
+                    // it — about 16 cells here, far under a quarter of the width.
+                    let cells = &marks[row * cols..(row + 1) * cols];
+                    let longest = cells.split(|m| *m == 0).map(<[u8]>::len).max().unwrap_or(0);
+                    assert!(
+                        longest * 4 < cols,
+                        "{name}, centred on {clon}°: row {row} has a run of {longest}/{cols} — a seam scar"
+                    );
+                }
+            }
         }
     }
 
