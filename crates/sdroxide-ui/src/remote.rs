@@ -161,6 +161,10 @@ pub struct RemoteController {
     mic_over_started: Option<f64>,
     mic_over_samples: usize,
     mic_over_reported: bool,
+    /// Whether this controller was pulling the microphone on the previous
+    /// frame — the rising edge into an over, used to drop the ring's stale
+    /// tail (see `pump_mic`).
+    mic_was_active: bool,
     transmitting: bool,
     /// The engine is recording a voice-keyer message. Its microphone is *our*
     /// microphone, so the uplink has to run for this too — otherwise a remote
@@ -279,6 +283,7 @@ impl RemoteController {
             mic_over_started: None,
             mic_over_samples: 0,
             mic_over_reported: false,
+            mic_was_active: false,
             transmitting: false,
             voice_recording: false,
             mic_buf: Vec::new(),
@@ -537,16 +542,33 @@ impl RemoteController {
 
     fn pump_mic(&mut self) {
         let Some(bridge) = self.audio.as_mut() else { return };
-        bridge.set_mic_active(self.transmitting || self.voice_recording);
-        if !self.transmitting && !self.voice_recording {
+        let active = self.transmitting || self.voice_recording;
+        bridge.set_mic_active(active);
+        if !active {
+            // **Do not drain the capture ring here.** The page has one
+            // microphone, shared by every radio tab, and only one of those
+            // radios can be transmitting at a time. An idle tab draining the
+            // ring every frame is what emptied it out from under the tab that
+            // *was* transmitting — so with a second (receive-only) radio in the
+            // station the microphone fed nothing and the transmitter went out
+            // unmodulated, while the capture itself looked perfect
+            // (issue #493). The browser caps the ring at about a second, so
+            // leaving it alone here costs nothing but that stale tail, which
+            // the rising edge below drops.
             self.mic_buf.clear();
-            // Keep draining the capture ring so it doesn't back up.
-            let mut scratch = Vec::new();
-            bridge.pull_mic(&mut scratch);
+            self.mic_was_active = false;
             self.mic_over_started = None;
             self.mic_over_samples = 0;
             self.mic_over_reported = false;
             return;
+        }
+        // Rising edge into an over: drop whatever the ring accumulated before
+        // now, so the first thing sent is the operator's voice and not a
+        // syllable of room noise captured while nothing was keyed.
+        if !self.mic_was_active {
+            let mut stale = Vec::new();
+            bridge.pull_mic(&mut stale);
+            self.mic_was_active = true;
         }
         let before = self.mic_buf.len();
         bridge.pull_mic(&mut self.mic_buf);
