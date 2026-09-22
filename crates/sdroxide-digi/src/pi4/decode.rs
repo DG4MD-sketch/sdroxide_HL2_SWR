@@ -211,9 +211,12 @@ fn coarse_search(audio: &[f32], boundary_sample: i64) -> Vec<CoarseHit> {
         .fold(0.0f32, f32::max);
 
     let fft = demod::plan();
-    let per_start: Vec<Option<CoarseHit>> = pool().install(|| {
+    let per_start: Vec<Vec<CoarseHit>> = pool().install(|| {
         use rayon::prelude::*;
-        starts.par_iter().map(|&start| best_at_start(fft.as_ref(), audio, start, max_hz)).collect()
+        starts
+            .par_iter()
+            .map(|&start| best_per_variant_at_start(fft.as_ref(), audio, start, max_hz))
+            .collect()
     });
 
     let mut hits: Vec<CoarseHit> = per_start.into_iter().flatten().collect();
@@ -241,15 +244,37 @@ fn coarse_search(audio: &[f32], boundary_sample: i64) -> Vec<CoarseHit> {
     kept
 }
 
-/// The best (variant, tone-0 frequency) at one start time, over one shared
-/// [`Spectra`].
-fn best_at_start(fft: &dyn Fft<f32>, audio: &[f32], start: i64, max_hz: f32) -> Option<CoarseHit> {
+/// The best tone-0 frequency for *each* beacon variant at one start time,
+/// over one shared [`Spectra`].
+///
+/// One candidate per variant rather than a single overall winner, because
+/// [`sync_score`] is a ratio of the power in the four hypothesised bins and
+/// nothing else: a hypothesis that lands on empty spectrum divides its own
+/// leakage by itself and scores a perfect 1.0, exactly as a true alignment
+/// does. The two then tie to the last bit of an `f32`, and whichever the loop
+/// reached first won — so when a wrong variant won, the true one reached the
+/// Fano stage at no start time at all and the beacon was simply never heard.
+/// Measured on clean synthesised transmissions, 9 of 64 were lost this way,
+/// every one of them a wide variant (PI4-80/96/120, whose search windows
+/// overlap each other's). Noise breaks the tie — it fills a wrong
+/// hypothesis's bins and drags its score towards zero — so this was only ever
+/// reachable above roughly 80 dB of per-bin signal-to-noise, which is to say
+/// on synthetic audio rather than on the air. Carrying all four costs
+/// nothing: the keep budget in [`coarse_search`] is unchanged, and a variant
+/// that is not present scores near zero and falls to [`MIN_COARSE_SCORE`].
+fn best_per_variant_at_start(
+    fft: &dyn Fft<f32>,
+    audio: &[f32],
+    start: i64,
+    max_hz: f32,
+) -> Vec<CoarseHit> {
     let spectra = demod::compute_spectra(fft, audio, start, max_hz);
-    let mut best: Option<CoarseHit> = None;
+    let mut out = Vec::with_capacity(Variant::ALL.len());
     for &variant in &Variant::ALL {
         let spacing = variant.tone_spacing_hz();
         let centre = variant.conventional_tone0_hz();
         let bin_steps = (FREQ_RADIUS_HZ / demod::BIN_HZ) as i32;
+        let mut best: Option<CoarseHit> = None;
         for k in -bin_steps..=bin_steps {
             let tone0 = centre + k as f32 * demod::BIN_HZ;
             let score = sync_score(&spectra, tone0, spacing);
@@ -257,8 +282,9 @@ fn best_at_start(fft: &dyn Fft<f32>, audio: &[f32], start: i64, max_hz: f32) -> 
                 best = Some(CoarseHit { start_sample: start, variant, tone0_hz: tone0, score });
             }
         }
+        out.extend(best);
     }
-    best
+    out
 }
 
 /// How well a hypothesis's *sync* bits — the ones the transmitter fixed in
@@ -585,6 +611,39 @@ mod tests {
         let hit = got.iter().find(|d| d.text == "PE1ITR").unwrap_or_else(|| panic!("{got:?}"));
         assert_eq!(hit.variant, Variant::Pi4_80);
         assert!((hit.dt_sec - 1.3).abs() < 0.1, "{}", hit.dt_sec);
+    }
+
+    /// Every beacon variant, clean and at its own conventional tone-0
+    /// frequency. The three wide-variant cases here decoded as nothing at all
+    /// until the coarse search began keeping a candidate per variant instead
+    /// of one overall — see `best_per_variant_at_start`, which explains why a
+    /// *noiseless* signal is the one that breaks it and a noisy one does not.
+    #[test]
+    fn every_variant_decodes_a_clean_on_frequency_beacon() {
+        for (variant, call) in [
+            (Variant::Pi4, "OZ7IGY"),
+            (Variant::Pi4_80, "SR3LES"),
+            (Variant::Pi4_96, "GB3VHF"),
+            (Variant::Pi4_120, "OZ7IGY"),
+        ] {
+            let tone0 = variant.conventional_tone0_hz();
+            let mut audio = vec![0.0f32; 32 * SAMPLE_RATE as usize];
+            let boundary = SAMPLE_RATE as i64;
+            let burst = synth(call, tone0, variant.tone_spacing_hz(), 0.3);
+            audio[boundary as usize..boundary as usize + burst.len()].copy_from_slice(&burst);
+
+            let got = decode_window(&audio, SAMPLE_RATE as u32, boundary);
+            let hit = got
+                .iter()
+                .find(|d| d.text == call)
+                .unwrap_or_else(|| panic!("{} {call} decoded as {got:?}", variant.label()));
+            assert_eq!(
+                hit.variant,
+                variant,
+                "{} {call} matched the wrong variant",
+                variant.label()
+            );
+        }
     }
 
     #[test]

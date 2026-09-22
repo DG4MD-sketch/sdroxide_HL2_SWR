@@ -49,8 +49,15 @@ pub const BIN_HZ: f32 = SAMPLE_RATE / SYMBOL_SAMPLES as f32;
 /// alignment — misidentified as the wrong variant outright. Hann's sidelobes
 /// fall away fast enough (≈−32 dB and dropping as 1/f³) that the same signal
 /// now scores 0.99999 at its true alignment against PI4-96's best (mis)fit of
-/// 0.999 — still close, because the two variants' conventional tone-0
-/// frequencies are themselves only 45 Hz apart, but correctly ordered.
+/// 0.999.
+///
+/// That is a narrower margin than it looks, and not one to rely on: on a
+/// clean enough signal both scores round to 1.0 outright and the ordering
+/// between them is decided by nothing at all. The window is worth keeping —
+/// it is what turns a confident misidentification into a tie — but what
+/// actually makes the search safe is that
+/// [`crate::pi4::decode`]'s coarse stage no longer asks this statistic to
+/// pick a winner across variants at all; see `best_per_variant_at_start`.
 /// [`goertzel_power`]'s later refinement pass does not have this problem — it
 /// is scoring one already-identified alignment, not choosing between several
 /// — so it stays unwindowed, the true matched filter.
