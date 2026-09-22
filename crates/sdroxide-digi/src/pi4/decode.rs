@@ -213,10 +213,7 @@ fn coarse_search(audio: &[f32], boundary_sample: i64) -> Vec<CoarseHit> {
     let fft = demod::plan();
     let per_start: Vec<Option<CoarseHit>> = pool().install(|| {
         use rayon::prelude::*;
-        starts
-            .par_iter()
-            .map(|&start| best_at_start(fft.as_ref(), audio, start, max_hz))
-            .collect()
+        starts.par_iter().map(|&start| best_at_start(fft.as_ref(), audio, start, max_hz)).collect()
     });
 
     let mut hits: Vec<CoarseHit> = per_start.into_iter().flatten().collect();
@@ -317,8 +314,9 @@ fn refine_and_decode(audio: &[f32], boundary_sample: i64, hit: &CoarseHit) -> Op
     // The full per-symbol tone powers at the refined alignment — computed
     // once and shared by the soft-metric extraction below and by
     // `fit_of`'s re-check afterwards, rather than measuring the audio twice.
-    let powers: Vec<[f32; 4]> =
-        (0..N_SYMBOLS).map(|n| symbol_tone_powers(audio, start_sample, n, tone0_hz, spacing)).collect();
+    let powers: Vec<[f32; 4]> = (0..N_SYMBOLS)
+        .map(|n| symbol_tone_powers(audio, start_sample, n, tone0_hz, spacing))
+        .collect();
 
     let (info_n, hard_errors) = fano_decode(&powers)?;
     let text = spec::unpack_message(info_n);
@@ -411,11 +409,9 @@ fn fano_decode(powers: &[[f32; 4]]) -> Option<(u64, u32)> {
     // does — the caller uses this only to rank candidates, not to gate.
     let coded = spec::encode_coded_bits(info_n);
     let recoded_channel = spec::interleave_to_channel(&coded);
-    let hard_errors = recoded_channel
-        .iter()
-        .zip(llrs.iter())
-        .filter(|&(&c, &l)| (c == 1) != (l < 0.0))
-        .count() as u32;
+    let hard_errors =
+        recoded_channel.iter().zip(llrs.iter()).filter(|&(&c, &l)| (c == 1) != (l < 0.0)).count()
+            as u32;
     Some((info_n, hard_errors))
 }
 

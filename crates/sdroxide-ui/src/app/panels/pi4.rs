@@ -73,7 +73,9 @@ impl SdroxideApp {
     fn pi4_spot_list(&mut self, ui: &mut egui::Ui) {
         let now = now_unix();
         ui.horizontal(|ui| {
-            ui.label(RichText::new("RECEPTIONS").size(9.5).strong().color(crate::theme::CYAN_DIM()));
+            ui.label(
+                RichText::new("RECEPTIONS").size(9.5).strong().color(crate::theme::CYAN_DIM()),
+            );
             crate::chrome::row_tail(ui, |ui| {
                 ui.label(
                     RichText::new(format!("{} rx", self.pi4_spots.len()))
@@ -165,78 +167,80 @@ impl SdroxideApp {
 }
 
 fn pi4_row(ui: &mut egui::Ui, s: &Pi4Spot, now: i64) {
-    egui::Frame::new().fill(crate::theme::ROW_BG()).inner_margin(egui::Margin {
-        left: 6,
-        right: 6,
-        top: 3,
-        bottom: 3,
-    })
-    .show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.set_min_height(PI4_ROW_H);
-            ui.spacing_mut().item_spacing.x = 5.0;
-            row_cell(
-                ui,
-                74.0,
-                PI4_ROW_H,
-                false,
-                egui::Label::new(
-                    RichText::new(&s.text).size(11.0).strong().color(crate::theme::TEXT_STRONG()),
-                )
-                .truncate(),
-            );
-            row_cell(
-                ui,
-                52.0,
-                PI4_ROW_H,
-                false,
-                egui::Label::new(
-                    RichText::new(&s.variant).size(9.5).color(crate::theme::CYAN_DIM()),
-                ),
-            );
-            row_cell(
-                ui,
-                46.0,
-                PI4_ROW_H,
-                true,
-                egui::Label::new(
-                    RichText::new(format!("{:+.0} dB", s.snr_db))
-                        .size(10.5)
-                        .strong()
-                        .color(fit_color(s.fit)),
-                ),
-            );
-            // `fit`: how much of the received tone energy this message
-            // accounts for. There is no checksum on a PI4 message, so this —
-            // not a bare pass/fail — is what says the decode is real rather
-            // than a well-formed guess out of noise.
-            row_cell(
-                ui,
-                40.0,
-                PI4_ROW_H,
-                true,
-                egui::Label::new(
-                    RichText::new(format!("{:.2}", s.fit)).size(9.5).color(crate::theme::gray(150)),
-                ),
-            );
-            crate::chrome::row_tail(ui, |ui| {
-                let t = s.slot_utc.rem_euclid(86_400);
-                ui.label(
-                    RichText::new(format!("{:02}:{:02}", t / 3600, (t % 3600) / 60))
-                        .size(9.5)
-                        .monospace()
-                        .color(crate::theme::gray(120)),
-                )
-                .on_hover_text(format!(
-                    "{:02}:{:02} UTC — {} ago",
-                    t / 3600,
-                    (t % 3600) / 60,
-                    fmt_age(now - s.slot_utc)
-                ));
+    egui::Frame::new()
+        .fill(crate::theme::ROW_BG())
+        .inner_margin(egui::Margin { left: 6, right: 6, top: 3, bottom: 3 })
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.set_min_height(PI4_ROW_H);
+                ui.spacing_mut().item_spacing.x = 5.0;
+                row_cell(
+                    ui,
+                    74.0,
+                    PI4_ROW_H,
+                    false,
+                    egui::Label::new(
+                        RichText::new(&s.text)
+                            .size(11.0)
+                            .strong()
+                            .color(crate::theme::TEXT_STRONG()),
+                    )
+                    .truncate(),
+                );
+                row_cell(
+                    ui,
+                    52.0,
+                    PI4_ROW_H,
+                    false,
+                    egui::Label::new(
+                        RichText::new(&s.variant).size(9.5).color(crate::theme::CYAN_DIM()),
+                    ),
+                );
+                row_cell(
+                    ui,
+                    46.0,
+                    PI4_ROW_H,
+                    true,
+                    egui::Label::new(
+                        RichText::new(format!("{:+.0} dB", s.snr_db))
+                            .size(10.5)
+                            .strong()
+                            .color(fit_color(s.fit)),
+                    ),
+                );
+                // `fit`: how much of the received tone energy this message
+                // accounts for. There is no checksum on a PI4 message, so this —
+                // not a bare pass/fail — is what says the decode is real rather
+                // than a well-formed guess out of noise.
+                row_cell(
+                    ui,
+                    40.0,
+                    PI4_ROW_H,
+                    true,
+                    egui::Label::new(
+                        RichText::new(format!("{:.2}", s.fit))
+                            .size(9.5)
+                            .color(crate::theme::gray(150)),
+                    ),
+                );
+                crate::chrome::row_tail(ui, |ui| {
+                    let t = s.slot_utc.rem_euclid(86_400);
+                    ui.label(
+                        RichText::new(format!("{:02}:{:02}", t / 3600, (t % 3600) / 60))
+                            .size(9.5)
+                            .monospace()
+                            .color(crate::theme::gray(120)),
+                    )
+                    .on_hover_text(format!(
+                        "{:02}:{:02} UTC — {} ago",
+                        t / 3600,
+                        (t % 3600) / 60,
+                        fmt_age(now - s.slot_utc)
+                    ));
+                });
             });
         });
-    });
 }
 
 /// Colour a reception by [`Pi4Spot::fit`] rather than by its SNR estimate:

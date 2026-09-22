@@ -2192,7 +2192,8 @@ mod tests {
     #[test]
     fn only_the_slotted_modes_have_a_slot_clock() {
         for mode in Mode::ALL {
-            let expected = matches!(mode, Mode::Ft8 | Mode::Ft4 | Mode::Ft2 | Mode::Wspr | Mode::Pi4);
+            let expected =
+                matches!(mode, Mode::Ft8 | Mode::Ft4 | Mode::Ft2 | Mode::Wspr | Mode::Pi4);
             assert_eq!(mode.slot_timing().is_some(), expected, "{mode:?}");
         }
         assert_eq!(Mode::Js8.slot_timing(), None);

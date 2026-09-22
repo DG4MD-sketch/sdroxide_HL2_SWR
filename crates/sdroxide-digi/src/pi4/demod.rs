@@ -90,7 +90,12 @@ pub fn plan() -> Arc<dyn Fft<f32>> {
 /// start time near the end of the buffer) read as silence rather than
 /// panicking, so a candidate near the search window's edge is merely a weak
 /// one, not a crash.
-pub fn compute_spectra(fft: &dyn Fft<f32>, audio: &[f32], start_sample: i64, max_hz: f32) -> Spectra {
+pub fn compute_spectra(
+    fft: &dyn Fft<f32>,
+    audio: &[f32],
+    start_sample: i64,
+    max_hz: f32,
+) -> Spectra {
     let nbins = ((max_hz / BIN_HZ).ceil() as usize + 1).min(SYMBOL_SAMPLES / 2);
     let mut mag2 = vec![0.0f32; N_SYMBOLS * nbins];
     let mut buf = vec![Complex32::new(0.0, 0.0); SYMBOL_SAMPLES];
@@ -100,11 +105,7 @@ pub fn compute_spectra(fft: &dyn Fft<f32>, audio: &[f32], start_sample: i64, max
         let base = start_sample + (sym * SYMBOL_SAMPLES) as i64;
         for (k, c) in buf.iter_mut().enumerate() {
             let idx = base + k as i64;
-            let s = if idx >= 0 {
-                audio.get(idx as usize).copied().unwrap_or(0.0)
-            } else {
-                0.0
-            };
+            let s = if idx >= 0 { audio.get(idx as usize).copied().unwrap_or(0.0) } else { 0.0 };
             *c = Complex32::new(s * window[k], 0.0);
         }
         fft.process(&mut buf);
@@ -119,9 +120,7 @@ pub fn compute_spectra(fft: &dyn Fft<f32>, audio: &[f32], start_sample: i64, max
 /// comment for why the coarse scan needs one and the refinement pass does
 /// not.
 fn hann_window() -> [f32; SYMBOL_SAMPLES] {
-    std::array::from_fn(|i| {
-        0.5 * (1.0 - (2.0 * PI * i as f32 / SYMBOL_SAMPLES as f32).cos())
-    })
+    std::array::from_fn(|i| 0.5 * (1.0 - (2.0 * PI * i as f32 / SYMBOL_SAMPLES as f32).cos()))
 }
 
 /// The Goertzel algorithm: power at one exact frequency over one symbol's
@@ -129,7 +128,13 @@ fn hann_window() -> [f32; SYMBOL_SAMPLES] {
 /// exactly [`SYMBOL_SAMPLES`] long (the refinement stage below passes the
 /// whole padded window's worth in some callers), and `start_sample` may run
 /// past the end of `audio` or before its start, both read as silence.
-pub fn goertzel_power(audio: &[f32], start_sample: i64, n: usize, sample_rate: f32, hz: f32) -> f32 {
+pub fn goertzel_power(
+    audio: &[f32],
+    start_sample: i64,
+    n: usize,
+    sample_rate: f32,
+    hz: f32,
+) -> f32 {
     let k = hz / sample_rate * n as f32;
     let w = 2.0 * PI * k / n as f32;
     let coeff = 2.0 * w.cos();
@@ -192,7 +197,8 @@ mod tests {
         let sent_tone = 2usize;
         let hz = tone0 + sent_tone as f32 * spacing;
         let n = SYMBOL_SAMPLES;
-        let audio: Vec<f32> = (0..n).map(|i| (2.0 * PI * hz * i as f32 / SAMPLE_RATE).sin()).collect();
+        let audio: Vec<f32> =
+            (0..n).map(|i| (2.0 * PI * hz * i as f32 / SAMPLE_RATE).sin()).collect();
         let powers = symbol_tone_powers(&audio, 0, 0, tone0, spacing);
         let winner = (0..4).max_by(|&a, &b| powers[a].partial_cmp(&powers[b]).unwrap()).unwrap();
         assert_eq!(winner, sent_tone, "{powers:?}");

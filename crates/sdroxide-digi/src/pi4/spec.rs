@@ -222,7 +222,8 @@ pub enum Variant {
 }
 
 impl Variant {
-    pub const ALL: [Variant; 4] = [Variant::Pi4, Variant::Pi4_80, Variant::Pi4_96, Variant::Pi4_120];
+    pub const ALL: [Variant; 4] =
+        [Variant::Pi4, Variant::Pi4_80, Variant::Pi4_96, Variant::Pi4_120];
 
     const fn k(self) -> u32 {
         match self {

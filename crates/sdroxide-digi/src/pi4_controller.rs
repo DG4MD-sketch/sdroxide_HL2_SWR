@@ -94,7 +94,8 @@ impl Pi4Controller {
                 while let Ok(job) = job_rx.recv() {
                     let decodes =
                         pi4::decode_window(&job.audio, DECODE_RATE as u32, job.boundary_sample);
-                    let res = DecodeResult { slot_utc: job.slot_utc, dial_hz: job.dial_hz, decodes };
+                    let res =
+                        DecodeResult { slot_utc: job.slot_utc, dial_hz: job.dial_hz, decodes };
                     if res_tx.send(res).is_err() {
                         break;
                     }
@@ -179,8 +180,11 @@ impl DigiEngine for Pi4Controller {
             match self.res_rx.try_recv() {
                 Ok(res) => {
                     self.pending = None;
-                    let spots: Vec<Pi4Spot> =
-                        res.decodes.iter().map(|d| self.to_spot(d, res.slot_utc, res.dial_hz)).collect();
+                    let spots: Vec<Pi4Spot> = res
+                        .decodes
+                        .iter()
+                        .map(|d| self.to_spot(d, res.slot_utc, res.dial_hz))
+                        .collect();
                     self.spots_last_slot = spots.len() as u32;
                     self.status_dirty = true;
                     if !spots.is_empty() {
