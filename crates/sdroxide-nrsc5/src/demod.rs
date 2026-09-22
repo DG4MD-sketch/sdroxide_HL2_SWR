@@ -29,23 +29,17 @@ use sdroxide_dsp::Demodulator;
 use sdroxide_types::HdRadioStatus;
 use tracing::{debug, warn};
 
+use crate::Mode;
 use crate::worker::HdWorker;
 
 /// FM hybrid HD Radio's native pipe rate, in samples per second.
 pub const FM_RATE_HZ: f64 = 744_187.5;
 
+/// HD-on-AM's native pipe rate, in samples per second.
+pub const AM_RATE_HZ: f64 = 46_511.71875;
+
 /// Rate of the decoded audio nrsc5 emits, in samples per second.
 pub const AUDIO_RATE: f64 = 44_100.0;
-
-/// The narrowest channel the decoder is started on.
-///
-/// The FM hybrid's digital sidebands reach 198.4 kHz either side of the
-/// carrier, so a channel under twice that cannot hold them, and the decoder
-/// would spend its time upsampling a stream with nothing to find in it — a
-/// demod-audio sound card at 48 kHz, fifteen-fold, for a lock that can never
-/// come. A little over twice the occupied width, for the channel filter's
-/// skirts.
-pub const MIN_CHANNEL_RATE_HZ: f64 = 400_000.0;
 
 /// Decoded audio held back before playback, and the point at which a backlog is
 /// dropped rather than allowed to become latency. In steady state the decoder
@@ -82,9 +76,11 @@ pub struct HdDemod {
 }
 
 impl HdDemod {
-    /// Build an FM HD Radio demodulator for a chain whose channel rate is
-    /// `channel_rate`.
-    pub fn new(channel_rate: f64) -> Self {
+    /// Build an HD Radio demodulator for a chain whose channel rate is
+    /// `channel_rate`, decoding the analogue source `mode` — the FM hybrid, or
+    /// HD on AM (the caller chooses from the dial; see
+    /// `sdroxide_dsp::hd_radio_is_am`).
+    pub fn new(channel_rate: f64, mode: Mode) -> Self {
         let mut unavailable = None;
         // The machine before the stream: no rate helps without the library.
         let worker = if let Some(why) = crate::unavailable_reason() {
@@ -93,19 +89,23 @@ impl HdDemod {
         } else if crate::worker::library_cannot_play() {
             unavailable = Some(crate::worker::NO_AUDIO_DECODER_WHY.to_string());
             None
-        } else if channel_rate < MIN_CHANNEL_RATE_HZ {
+        } else if channel_rate < mode.min_channel_rate_hz() {
             let why = format!(
-                "HD Radio needs at least {:.0} kHz of stream to hold both digital sidebands, \
-                 and this one is {:.1} kHz — raise the device sample rate, or use a receiver \
-                 that hands over I/Q rather than demodulated audio",
-                MIN_CHANNEL_RATE_HZ / 1e3,
+                "HD Radio ({}) needs at least {:.0} kHz of stream, and this one is {:.1} kHz — \
+                 raise the device sample rate, or use a receiver that hands over I/Q rather than \
+                 demodulated audio",
+                match mode {
+                    Mode::Fm => "the FM hybrid",
+                    Mode::Am => "the AM-band variant",
+                },
+                mode.min_channel_rate_hz() / 1e3,
                 channel_rate / 1e3
             );
             warn!("{why}");
             unavailable = Some(why);
             None
         } else {
-            match HdWorker::new(channel_rate) {
+            match HdWorker::new(channel_rate, mode) {
                 Ok(w) => {
                     debug!(channel_rate, "HD Radio decoder attached to the receive chain");
                     Some(w)
@@ -350,12 +350,26 @@ mod tests {
         assert!(audio.is_empty(), "both frames consumed, four values");
     }
 
+    /// The two variants carry their own native pipe rate and their own minimum
+    /// channel width — the FM hybrid's ±198 kHz against the AM variant's
+    /// ±15 kHz (issue #489).
+    #[test]
+    fn each_variant_sets_its_own_rate_and_minimum() {
+        assert_eq!(Mode::Fm.native_rate_hz(), FM_RATE_HZ);
+        assert_eq!(Mode::Am.native_rate_hz(), AM_RATE_HZ);
+        assert!(Mode::Am.min_channel_rate_hz() < Mode::Fm.min_channel_rate_hz());
+        // The AM floor clears the ~±15 kHz the variant occupies; the FM floor
+        // is the hybrid's ±198 kHz sidebands.
+        assert!(Mode::Am.min_channel_rate_hz() >= 30_000.0);
+        assert!(Mode::Fm.min_channel_rate_hz() >= 396_800.0);
+    }
+
     /// A stream too narrow for the digital sidebands starts no decoder, and the
     /// status says why, naming the rate — unless there is no library at all,
     /// which no rate would fix and so is said first.
     #[test]
     fn a_channel_too_narrow_for_the_sidebands_says_so() {
-        let mut demod = HdDemod::new(48_000.0);
+        let mut demod = HdDemod::new(48_000.0, Mode::Fm);
         let status = demod.take_hd_radio().expect("the reason is published");
         let why = status.unavailable.expect("unavailable");
         match crate::unavailable_reason() {

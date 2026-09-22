@@ -61,7 +61,10 @@ pub use ctcss::{SubToneDetect, golay23_decode, golay23_encode};
 pub use cw::{CwDecoder, CwRx, CwSelfRx, CwTx, morse_decode, morse_encode, text_duration_s};
 pub use ddc::Ddc;
 pub use decim::{Decimator, FirDecim, HalfbandDecim, RealFirDecim, lowpass_taps};
-pub use demod::{ComplexDcBlock, DcBlock, Demodulator, channel_target, make_demod};
+pub use demod::{
+    ComplexDcBlock, DcBlock, Demodulator, channel_target, channel_target_at, hd_radio_is_am,
+    make_demod,
+};
 pub use dfnr::DeepFilterNr;
 pub use diversity::{Diversity, DiversityMode};
 pub use eq::ParametricEq;

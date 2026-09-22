@@ -24,7 +24,6 @@ use sdroxide_dsp::ComplexResampler;
 use sdroxide_types::{HdAudioService, HdRadioStatus};
 use tracing::{debug, warn};
 
-use crate::demod::FM_RATE_HZ;
 use crate::{Event, HdReceiver, Mode, NrsError};
 
 /// Target RMS of the samples handed to the decoder.
@@ -33,12 +32,6 @@ use crate::{Event, HdReceiver, Mode, NrsError};
 /// agnostic, but the HDC decoder downstream expects a sane amplitude, and a
 /// level that swings with fading costs decodes. Slow to follow, like DRM's.
 const TARGET_RMS: f32 = 0.06;
-
-/// One-pole coefficient for the level estimate: ~0.5 s at the rate it runs at,
-/// which is the decoder's own, after resampling. Written for 96 kHz, it made the
-/// time constant 65 ms at 744 kHz — a gain that followed fading instead of
-/// riding it out.
-const LEVEL_ALPHA: f32 = (1.0 / (0.5 * FM_RATE_HZ)) as f32;
 
 /// How much channel I/Q the queue into this thread holds, in seconds. A
 /// decoder that falls further behind than this loses the oldest samples rather
@@ -141,10 +134,11 @@ pub(crate) struct HdWorker {
 }
 
 impl HdWorker {
-    /// Start a decoder for a chain whose channel rate is `channel_rate`. The
-    /// receiver is opened on the thread that drives it, and a failed open comes
-    /// back here rather than leaving a thread with nothing to do.
-    pub fn new(channel_rate: f64) -> Result<Self, NrsError> {
+    /// Start a decoder for a chain whose channel rate is `channel_rate`, for
+    /// the analogue source `mode`. The receiver is opened on the thread that
+    /// drives it, and a failed open comes back here rather than leaving a
+    /// thread with nothing to do.
+    pub fn new(channel_rate: f64, mode: Mode) -> Result<Self, NrsError> {
         let capacity = ((channel_rate * INPUT_SECONDS) as usize).max(CHUNK);
         let (input, queue) = rtrb::RingBuffer::new(capacity);
         let shared = Arc::new(Shared::new());
@@ -154,7 +148,7 @@ impl HdWorker {
             std::thread::Builder::new()
                 .name("hd-radio".into())
                 .spawn(move || {
-                    let receiver = match HdReceiver::open(Mode::Fm) {
+                    let receiver = match HdReceiver::open(mode) {
                         Ok(r) => {
                             let _ = tx.send(Ok(()));
                             r
@@ -164,7 +158,7 @@ impl HdWorker {
                             return;
                         }
                     };
-                    run(receiver, queue, &shared, channel_rate);
+                    run(receiver, queue, &shared, channel_rate, mode);
                 })
                 .expect("spawn the HD Radio decoder thread")
         };
@@ -227,9 +221,10 @@ fn run(
     mut queue: rtrb::Consumer<Complex32>,
     shared: &Shared,
     channel_rate: f64,
+    mode: Mode,
 ) {
     let mut receiver = Some(receiver);
-    let mut feed = Feed::new(channel_rate);
+    let mut feed = Feed::new(channel_rate, mode);
     let mut block: Vec<Complex32> = Vec::with_capacity(CHUNK);
     while !shared.stop.load(Ordering::Relaxed) {
         if shared.restart.swap(false, Ordering::Relaxed) {
@@ -239,7 +234,7 @@ fn run(
                 chunk.commit_all();
             }
             receiver = None;
-            feed = Feed::new(channel_rate);
+            feed = Feed::new(channel_rate, mode);
             // The programme was put back to HD-1 by whoever asked for the
             // restart, and may have been changed again since; keep what it is.
             let program = {
@@ -257,7 +252,7 @@ fn run(
             // A library that cannot play is not reopened to find that out
             // again: the queue is still drained below, and nothing is decoded.
             if !library_cannot_play() {
-                match HdReceiver::open(Mode::Fm) {
+                match HdReceiver::open(mode) {
                     Ok(r) => receiver = Some(r),
                     Err(e) => {
                         warn!(?e, "could not restart the HD Radio decoder; the mode will be silent")
@@ -305,16 +300,23 @@ struct Feed {
     level: Option<f32>,
     /// The gain last applied, held while there is nothing to measure.
     gain: f32,
+    /// One-pole coefficient for the level estimate: ~0.5 s at the rate it runs
+    /// at, which is the decoder's own after resampling. Written for 96 kHz, it
+    /// made the time constant 65 ms at 744 kHz — a gain that followed fading
+    /// instead of riding it out.
+    level_alpha: f32,
 }
 
 impl Feed {
-    fn new(channel_rate: f64) -> Self {
+    fn new(channel_rate: f64, mode: Mode) -> Self {
+        let native = mode.native_rate_hz();
         Feed {
-            resampler: ComplexResampler::new(channel_rate, FM_RATE_HZ),
+            resampler: ComplexResampler::new(channel_rate, native),
             rs_buf: Vec::new(),
             iq_buf: Vec::new(),
             level: None,
             gain: 1.0,
+            level_alpha: (1.0 / (0.5 * native)) as f32,
         }
     }
 
@@ -334,7 +336,7 @@ impl Feed {
             self.rs_buf.iter().map(power).sum::<f32>() / self.rs_buf.len() as f32
         });
         for z in &self.rs_buf {
-            level += LEVEL_ALPHA * (power(z) - level);
+            level += self.level_alpha * (power(z) - level);
         }
         self.level = Some(level);
         // A silent input would divide by zero and then clip on the first real

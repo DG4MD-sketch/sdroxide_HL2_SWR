@@ -123,21 +123,51 @@ pub trait Demodulator: Send {
 }
 
 /// The channel rate a mode's demodulator wants from the DDC.
+///
+/// The FM figure for HD Radio: a caller that does not know where the dial is
+/// (or is not on HD Radio at all) gets the hybrid's wide stream. See
+/// [`channel_target_at`] for the dial-aware version.
 pub fn channel_target(mode: Mode) -> f64 {
+    channel_target_at(mode, 0.0)
+}
+
+/// The channel rate a mode's demodulator wants from the DDC, for a receiver
+/// tuned to `dial_hz`.
+///
+/// HD Radio is the one mode whose channel depends on where the dial is. The FM
+/// hybrid's carrier and both OFDM sidebands span roughly ±198 kHz, so it wants
+/// the wide stream; the **AM-band variant** (HD on AM, in the medium-wave
+/// broadcast band) occupies only about ±15 kHz, and feeding it the FM window
+/// would drown it in medium-wave noise — a thirteenth of the signal in thirteen
+/// times the stream (issue #489). Every other mode ignores `dial_hz`.
+pub fn channel_target_at(mode: Mode, dial_hz: f64) -> f64 {
     match mode {
         // Generous rate for WFM: the discriminator wraps when the composite
         // deviation exceeds ±fs/2, so ±128 kHz of margin keeps broadcast
         // peaks (±75 kHz nominal) well clear of click territory.
         Mode::Wfm => 256_000.0,
+        // The AM-band HD variant: ±15 kHz occupied, and 48 kHz clears it with
+        // room for the channel filter's skirts.
+        Mode::HdRadio if hd_radio_is_am(dial_hz) => 48_000.0,
         // The FM hybrid's carrier and both OFDM sidebands span roughly
         // ±198 kHz, and the HD Radio decoder is fed at its own fixed rate
         // (744,187.5 S/s) by its own resampler. This only has to be wide
         // enough that the DDC's anti-alias filter passes both sidebands, so a
-        // little over the occupied bandwidth. The AM-band HD variant wants a
-        // far narrower window, which is why it is not wired up yet.
+        // little over the occupied bandwidth.
         Mode::HdRadio => 744_187.5,
         _ => 48_000.0,
     }
+}
+
+/// Whether an HD Radio channel at `hz` is the **AM-band variant** (HD on AM)
+/// rather than the FM hybrid.
+///
+/// HD-on-AM lives in the medium-wave broadcast band; everywhere else HD Radio
+/// is the FM hybrid. The span is the widest any region's MW band uses — the
+/// Americas reach about 1 710 kHz — so the narrower Regions 1 and 3 span is
+/// covered too.
+pub fn hd_radio_is_am(hz: f64) -> bool {
+    (526_500.0..=1_710_000.0).contains(&hz)
 }
 
 /// Demodulator for a mode (`None` = no audio, e.g. SPEC).
@@ -1288,5 +1318,33 @@ impl PilotPll {
     /// Exists for the RDS decoder, whose subcarrier is this frequency tripled.
     fn tracked_hz(&self) -> Option<f64> {
         self.locked.then(|| (self.nominal + self.freq) * self.rate / std::f64::consts::TAU)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// HD Radio is the one mode whose channel follows the dial: the FM hybrid
+    /// wants its wide stream, HD-on-AM the narrow one.
+    #[test]
+    fn the_hd_channel_follows_the_dial_between_am_and_fm() {
+        // FM HD: the wide hybrid stream.
+        assert_eq!(channel_target_at(Mode::HdRadio, 98_000_000.0), 744_187.5);
+        assert!(!hd_radio_is_am(98_000_000.0));
+        // AM HD: the narrow medium-wave stream.
+        assert_eq!(channel_target_at(Mode::HdRadio, 1_650_000.0), 48_000.0);
+        assert!(hd_radio_is_am(1_650_000.0));
+        // The band's own edges, and just outside them.
+        assert!(hd_radio_is_am(526_500.0));
+        assert!(hd_radio_is_am(1_710_000.0));
+        assert!(!hd_radio_is_am(525_000.0));
+        assert!(!hd_radio_is_am(2_000_000.0));
+        // A caller with no dial gets the FM figure, which is what the function
+        // did before it took one.
+        assert_eq!(channel_target(Mode::HdRadio), 744_187.5);
+        // Every other mode ignores the dial.
+        assert_eq!(channel_target_at(Mode::Wfm, 1_650_000.0), 256_000.0);
+        assert_eq!(channel_target_at(Mode::Usb, 1_650_000.0), 48_000.0);
     }
 }

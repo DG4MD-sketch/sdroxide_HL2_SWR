@@ -26,12 +26,12 @@ use sdroxide_drm::DrmDemod;
 use sdroxide_dsp::{
     AdcMeter, Agc, AutoNotch, Binaural, Cessb, DcBlock, Ddc, Decimator, DeepFilterNr, Demodulator,
     Duc, Modulator, MonoResampler, Nco, NeuralNr, NoiseBlanker, Nr2, ParametricEq, SpecBleachNr,
-    SpectralNr, SpectrumAnalyzer, StereoResampler, SubToneGen, ToneBurst, channel_target,
-    make_demod, make_modulator,
+    SpectralNr, SpectrumAnalyzer, StereoResampler, SubToneGen, ToneBurst, channel_target_at,
+    hd_radio_is_am, make_demod, make_modulator,
 };
 use sdroxide_hfdl::HfdlController;
 use sdroxide_ism::{IsmAction, IsmController};
-use sdroxide_nrsc5::HdDemod;
+use sdroxide_nrsc5::{HdDemod, Mode as HdMode};
 use sdroxide_qo100::Qo100Controller;
 use sdroxide_rigctld::{RigState, RigctldController};
 use sdroxide_skimmer::{SkimmerAction, SkimmerController};
@@ -773,6 +773,10 @@ struct RxChain {
     ddc: Ddc,
     demod: Option<Box<dyn Demodulator>>,
     mode: Mode,
+    /// Where the dial was when the chain was last (re)built. HD Radio is the
+    /// one mode whose channel rate depends on it — the FM hybrid or HD on AM
+    /// (issue #489) — so the value is kept to notice a change and rebuild.
+    dial_hz: f64,
     agc: Agc,
     resampler: Option<MonoResampler>,
     out_rate: f64,
@@ -831,12 +835,13 @@ struct RxChain {
 }
 
 impl RxChain {
-    fn new(in_rate: f64, rx: &RxState, out_rate: f64) -> Self {
+    fn new(in_rate: f64, rx: &RxState, out_rate: f64, dial_hz: f64) -> Self {
         let mut chain = RxChain {
             in_rate,
-            ddc: Ddc::new(in_rate, channel_target(rx.mode)),
+            ddc: Ddc::new(in_rate, channel_target_at(rx.mode, dial_hz)),
             demod: None,
             mode: rx.mode,
+            dial_hz,
             agc: Agc::new(48_000.0),
             resampler: None,
             out_rate,
@@ -867,7 +872,7 @@ impl RxChain {
             rec_buf: Vec::new(),
             rec_buf_r: Vec::new(),
         };
-        chain.build_for_mode(rx);
+        chain.build_for_mode(rx, dial_hz);
         chain
     }
 
@@ -888,9 +893,10 @@ impl RxChain {
 
     /// (Re)build demod/AGC/resampler for the mode in `rx`, and the DDC if
     /// the channel target changed. Keeps the NCO offset.
-    fn build_for_mode(&mut self, rx: &RxState) {
+    fn build_for_mode(&mut self, rx: &RxState, dial_hz: f64) {
         self.mode = rx.mode;
-        let target = channel_target(rx.mode);
+        self.dial_hz = dial_hz;
+        let target = channel_target_at(rx.mode, dial_hz);
         if (self.ddc.out_rate() - target).abs() / target > 0.5 || self.ddc.out_rate() < target {
             self.ddc = Ddc::new(self.in_rate, target);
             self.ddc.set_offset_hz(self.offset_hz);
@@ -912,7 +918,11 @@ impl RxChain {
         self.demod = match rx.mode {
             Mode::Drm => Some(Box::new(DrmDemod::new(self.ddc.out_rate())) as Box<dyn Demodulator>),
             Mode::HdRadio => {
-                Some(Box::new(HdDemod::new(self.ddc.out_rate())) as Box<dyn Demodulator>)
+                // HD Radio is two decoders on two channel rates, and which one
+                // is wanted is a property of the dial: the FM hybrid or HD on
+                // AM (issue #489).
+                let hd = if hd_radio_is_am(dial_hz) { HdMode::Am } else { HdMode::Fm };
+                Some(Box::new(HdDemod::new(self.ddc.out_rate(), hd)) as Box<dyn Demodulator>)
             }
             _ => make_demod(rx.mode, self.ddc.out_rate()),
         };
@@ -3794,7 +3804,12 @@ fn engine_thread(
             (None, Some(StereoMixer::new(audio.producer)), audio.out_rate, rs)
         }
         Some(audio) => {
-            let chain = RxChain::new(state.sample_rate, &state.rx[0], audio.out_rate);
+            let chain = RxChain::new(
+                state.sample_rate,
+                &state.rx[0],
+                audio.out_rate,
+                state.active_freq_hz(),
+            );
             info!(channel_rate = chain.ddc.out_rate(), out_rate = audio.out_rate, "audio chain up");
             (Some(chain), Some(StereoMixer::new(audio.producer)), audio.out_rate, None)
         }
@@ -5987,8 +6002,9 @@ impl Engine {
                     // without this the internal demod (e.g. TCI wideband-IQ RX)
                     // keeps the old sideband while state/UI already show the new
                     // mode — the LSB-shows-but-demodulates-USB desync.
+                    let dial = self.state.rx_freq_hz();
                     if let Some(c) = self.chain_mut(RxId::Main) {
-                        c.build_for_mode(&snapshot);
+                        c.build_for_mode(&snapshot, dial);
                     }
                     self.update_display_center(); // sideband flip changes the window
                     self.sync_digi_mode();
@@ -8179,6 +8195,7 @@ impl Engine {
                         self.state.sample_rate,
                         &self.state.rx[1],
                         self.audio_out_rate,
+                        self.state.sub_rx_hz,
                     ));
                 } else if !on {
                     self.sub = None;
@@ -12892,7 +12909,7 @@ impl Engine {
         (r.filter_lo, r.filter_hi) = (lo, hi);
         let snapshot = *r;
         if let Some(c) = self.chain_mut(rx) {
-            c.build_for_mode(&snapshot);
+            c.build_for_mode(&snapshot, dial);
         }
         // A CAT rig: command its mode (subject to the mode policy) and, since
         // the sideband flips which half of the audio band is RF, re-center.
@@ -14443,8 +14460,12 @@ impl Engine {
         self.stop_recording();
         match audio {
             Some(a) => {
-                self.main =
-                    Some(RxChain::new(self.state.sample_rate, &self.state.rx[0], a.out_rate));
+                self.main = Some(RxChain::new(
+                    self.state.sample_rate,
+                    &self.state.rx[0],
+                    a.out_rate,
+                    self.state.rx_freq_hz(),
+                ));
                 let mut mixer = StereoMixer::new(a.producer);
                 // A swap mid-announcement must not come back at full volume.
                 mixer.set_duck(self.speech_duck);
@@ -14453,10 +14474,14 @@ impl Engine {
                 mixer.set_trim_db(self.rx_af_gain_db);
                 self.mixer = Some(mixer);
                 self.audio_out_rate = a.out_rate;
-                self.sub = self
-                    .state
-                    .sub_rx_enabled
-                    .then(|| RxChain::new(self.state.sample_rate, &self.state.rx[1], a.out_rate));
+                self.sub = self.state.sub_rx_enabled.then(|| {
+                    RxChain::new(
+                        self.state.sample_rate,
+                        &self.state.rx[1],
+                        a.out_rate,
+                        self.state.sub_rx_hz,
+                    )
+                });
                 self.sync_audio_tap();
                 info!(out_rate = a.out_rate, "audio output swapped");
             }
@@ -14522,10 +14547,19 @@ impl Engine {
             self.analyzer_view_span(),
         );
         if self.mixer.is_some() {
-            self.main =
-                Some(RxChain::new(self.state.sample_rate, &self.state.rx[0], self.audio_out_rate));
+            self.main = Some(RxChain::new(
+                self.state.sample_rate,
+                &self.state.rx[0],
+                self.audio_out_rate,
+                self.state.rx_freq_hz(),
+            ));
             self.sub = self.state.sub_rx_enabled.then(|| {
-                RxChain::new(self.state.sample_rate, &self.state.rx[1], self.audio_out_rate)
+                RxChain::new(
+                    self.state.sample_rate,
+                    &self.state.rx[1],
+                    self.audio_out_rate,
+                    self.state.sub_rx_hz,
+                )
             });
         }
         // The digital-mode controller and its high-resolution waterfall are fed
@@ -14921,6 +14955,7 @@ impl Engine {
                     self.state.sample_rate,
                     &self.state.rx[0],
                     self.audio_out_rate,
+                    self.state.rx_freq_hz(),
                 ));
                 self.audio_resampler = None;
             }
@@ -15050,9 +15085,18 @@ impl Engine {
             }
         }
         if (dial - self.hd_dial_hz).abs() > HD_RADIO_RETUNE_HZ {
+            // HD Radio's two variants are different decoders on different
+            // channel rates, and which is wanted is a property of the band the
+            // dial landed in — so a move between them is a rebuild of the
+            // chain, not a restart of the decoder (issue #489).
+            let variant_changed = hd_radio_is_am(self.hd_dial_hz) != hd_radio_is_am(dial);
             self.hd_dial_hz = dial;
+            let rx = self.state.rx[0];
             if let Some(c) = self.main.as_mut() {
                 c.reset_hd_radio();
+                if variant_changed && rx.mode == Mode::HdRadio {
+                    c.build_for_mode(&rx, dial);
+                }
             }
         }
         if let Some(c) = self.main.as_mut() {
@@ -17591,7 +17635,7 @@ mod stereo_tests {
         let out_rate = 48_000.0;
         let mut rx = RxState::with_mode(Mode::Wfm);
         rx.volume = 1.0;
-        let mut chain = RxChain::new(dev_rate, &rx, out_rate);
+        let mut chain = RxChain::new(dev_rate, &rx, out_rate, 98_000_000.0);
 
         let iq = wfm_stereo_iq(dev_rate, 6.0);
         let (mut left, mut right) = (Vec::new(), Vec::new());
@@ -17642,7 +17686,7 @@ mod stereo_tests {
         let dev_rate = 1_536_000.0;
         let mut rx = RxState::with_mode(Mode::Wfm);
         rx.volume = 1.0;
-        let mut chain = RxChain::new(dev_rate, &rx, 48_000.0);
+        let mut chain = RxChain::new(dev_rate, &rx, 48_000.0, 98_000_000.0);
         let iq = wfm_stereo_iq(dev_rate, 3.0);
         for block in iq.chunks(16_384) {
             let _ = chain.run(block, &rx, false);
@@ -17670,7 +17714,7 @@ mod stereo_tests {
         let dev_rate = 1_536_000.0;
         let mut rx = RxState::with_mode(Mode::Usb);
         rx.volume = 1.0;
-        let mut chain = RxChain::new(dev_rate, &rx, 48_000.0);
+        let mut chain = RxChain::new(dev_rate, &rx, 48_000.0, 14_200_000.0);
         // Broadband noise is the honest input here: it is what NR is pointed at.
         let mut seed = 0x5EEDu64;
         let iq: Vec<Complex32> = (0..16_384 * 8)
