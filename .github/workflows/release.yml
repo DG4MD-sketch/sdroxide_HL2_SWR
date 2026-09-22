@@ -6,6 +6,14 @@ on:
   # Manual runs build all artifacts (downloadable from the run page) without
   # creating a release — useful for testing the pipeline.
   workflow_dispatch:
+  # Nightly build, 03:00 UTC. Same deal as a manual run — `release` is gated on
+  # a tag, so nothing is published — but it builds the four platforms listed in
+  # `targets` rather than all fourteen, and the result is downloaded from the
+  # run's Artifacts section. Note that GitHub runs a schedule on the default
+  # branch only, and disables it after 60 days with no commits to the
+  # repository; a push re-enables it.
+  schedule:
+    - cron: '0 3 * * *'
 
 permissions:
   contents: write
@@ -44,26 +52,32 @@ jobs:
           name: web-dist
           path: crates/sdroxide-web/dist
           if-no-files-found: error
+          # A nightly is superseded the next night, so it need not sit on the
+          # run page for the repository's default 90 days. 0 means "use the
+          # default", which is what a tagged or manual run keeps.
+          retention-days: ${{ github.event_name == 'schedule' && 14 || 0 }}
 
-  build:
-    name: ${{ matrix.label }} (${{ matrix.variant }})
-    needs: web
-    runs-on: ${{ matrix.os }}
-    # Empty for every non-compat entry, which means "no container".
-    container: ${{ matrix.container }}
-    strategy:
-      fail-fast: false
-      matrix:
-        # Build every platform twice: `soapy` (dynamically links SoapySDR) and
-        # `cat` (--no-default-features: no SoapySDR, runs without libSoapySDR
-        # installed; drive a CAT rig over serial + a sound card instead).
-        variant: [soapy, cat]
-        label: [linux-x86_64, linux-aarch64, linux-x86_64-compat, linux-aarch64-compat, windows-x86_64, macos-aarch64, macos-x86_64]
-        include:
-          - label: linux-x86_64
-            os: ubuntu-latest
-          - label: linux-aarch64
-            os: ubuntu-24.04-arm
+  # Which build combinations this run wants. A tag or a manual run builds all
+  # fourteen; the nightly builds four — the standard (non-SoapySDR) variant of
+  # the platforms most people run. A scheduled run publishes nothing (`release`
+  # below is gated on a tag), so its artifacts on the run page are the whole
+  # product of the run and the releases page never hears about it.
+  #
+  # The platform table lives in this job rather than in `build`'s own
+  # `strategy.matrix` because a matrix written in YAML cannot be narrowed per
+  # event. Shrinking the `label` list would leave the `include:` entries that
+  # map a label to its runner with nothing to attach to, and GitHub turns an
+  # unattached `include:` entry into an extra job rather than dropping it — so
+  # the three platforms the nightly means to skip would come back as three
+  # more builds.
+  targets:
+    name: pick targets
+    runs-on: ubuntu-latest
+    outputs:
+      combos: ${{ steps.pick.outputs.combos }}
+    steps:
+      - id: pick
+        run: |
           # The -compat builds are the same two Linux builds compiled inside an
           # Ubuntu 22.04 container, so the binaries link glibc 2.35 and run on
           # stable/LTS distributions (Ubuntu 22.04, Mint 21, Debian 12,
@@ -72,18 +86,52 @@ jobs:
           # container rather than `runs-on: ubuntu-22.04` because GitHub
           # retires that runner image on 2027-04-17 with brownouts from
           # 2026-09-17, while a container image keeps working on any runner.
-          - label: linux-x86_64-compat
-            os: ubuntu-latest
-            container: ubuntu:22.04
-          - label: linux-aarch64-compat
-            os: ubuntu-24.04-arm
-            container: ubuntu:22.04
-          - label: windows-x86_64
-            os: windows-latest
-          - label: macos-aarch64
-            os: macos-latest
-          - label: macos-x86_64
-            os: macos-15-intel
+          # Every other entry carries no `container` key, which `build` reads
+          # as the empty string and GitHub as "no container".
+          platforms='[
+            {"label": "linux-x86_64",         "os": "ubuntu-latest"},
+            {"label": "linux-aarch64",        "os": "ubuntu-24.04-arm"},
+            {"label": "linux-x86_64-compat",  "os": "ubuntu-latest",    "container": "ubuntu:22.04"},
+            {"label": "linux-aarch64-compat", "os": "ubuntu-24.04-arm", "container": "ubuntu:22.04"},
+            {"label": "windows-x86_64",       "os": "windows-latest"},
+            {"label": "macos-aarch64",        "os": "macos-latest"},
+            {"label": "macos-x86_64",         "os": "macos-15-intel"}
+          ]'
+          # Every platform is built twice: `soapy` (dynamically links SoapySDR)
+          # and `cat` (--no-default-features: no SoapySDR, runs without
+          # libSoapySDR installed; drive a CAT rig over serial + a sound card
+          # instead). The nightly builds `cat` only — it is what the installers
+          # ship and the one a tester can run without installing PothosSDR
+          # first.
+          if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
+            wanted='["linux-x86_64-compat", "linux-aarch64-compat", "windows-x86_64", "macos-aarch64"]'
+            variants='["cat"]'
+          else
+            wanted='null'
+            variants='["soapy", "cat"]'
+          fi
+          # An include-only matrix: one job per entry, and no cross product to
+          # filter down afterwards.
+          combos=$(jq -cn \
+            --argjson platforms "$platforms" \
+            --argjson wanted "$wanted" \
+            --argjson variants "$variants" \
+            '{include: [ $platforms[] as $p
+                         | select($wanted == null or ($wanted | index($p.label)) != null)
+                         | $variants[]
+                         | $p + {variant: .} ]}')
+          echo "combos=$combos" >> "$GITHUB_OUTPUT"
+          echo "$combos" | jq .
+
+  build:
+    name: ${{ matrix.label }} (${{ matrix.variant }})
+    needs: [web, targets]
+    runs-on: ${{ matrix.os }}
+    # Empty for every non-compat entry, which means "no container".
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.targets.outputs.combos) }}
     defaults:
       run:
         shell: bash
@@ -721,6 +769,9 @@ jobs:
           name: pkg-${{ matrix.label }}-${{ matrix.variant }}
           path: out/*
           if-no-files-found: error
+          # As above: a nightly's artifacts expire in a fortnight, a tagged
+          # build's become the release assets and keep the default retention.
+          retention-days: ${{ github.event_name == 'schedule' && 14 || 0 }}
 
   release:
     name: create release
