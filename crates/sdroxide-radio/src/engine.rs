@@ -7868,6 +7868,28 @@ impl Engine {
                 if vfo == self.state.active_vfo {
                     self.state.band = Band::containing(hz);
                     self.follow_dial();
+                    // In HFDL the dial and the panel's channel are two controls
+                    // for one thing, and the operator turns the dial. Carry it
+                    // into the channel so the lane follows the signal they have
+                    // tuned to, rather than sitting on the last chip pressed —
+                    // which left a station heard clearly on 8 843 kHz decoding
+                    // silence at the 21 931 default (reported on #497). The
+                    // panel's chips still work: they send a dial move too, and
+                    // this makes the two agree from either side.
+                    if self.state.rx[0].mode.is_hfdl()
+                        && (self.state.hfdl.frequency_hz - hz).abs() >= 0.5
+                    {
+                        self.state.hfdl.frequency_hz = hz;
+                        if let Some(c) = self.hfdl.as_ref() {
+                            c.set_config(self.state.hfdl);
+                        }
+                        // Re-seat the lane's mixer now rather than waiting for
+                        // the next centre change: `follow_dial` only moves the
+                        // hardware once the dial leaves the span, so a retune
+                        // inside it would otherwise leave the DDC on the old
+                        // channel.
+                        self.sync_hfdl_window();
+                    }
                 }
                 self.update_tuning();
             }
