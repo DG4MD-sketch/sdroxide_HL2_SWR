@@ -713,9 +713,14 @@ fn auto_fit_default() -> bool {
 /// list itself so the two cannot drift apart.
 pub const SPOT_KINDS: usize = sdroxide_types::SpotKind::COUNT;
 
-/// Default for [`ViewState::center_on_vfo`]: on.
+/// Default for [`ViewState::center_on_vfo`]: off, so a new station pans and
+/// zooms where it is put. Lit, the window follows the dial *and* a zoom brings
+/// it back to the middle, which is what the mode promises — but on a front end
+/// with a full-band lane that also means a zoom onto a signal away from the
+/// dial is pulled home again rather than being followed, so the mode is one to
+/// ask for rather than one to arrive in.
 fn center_on_vfo_default() -> bool {
-    true
+    false
 }
 
 /// Default for [`ViewState::spot_kinds_shown`] — every kind shown, so enabling
