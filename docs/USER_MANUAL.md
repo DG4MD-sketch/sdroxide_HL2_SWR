@@ -5761,12 +5761,13 @@ grid square, so there is nowhere to place one.
 
 Tune so the beacon's CW identification and the unmodulated carrier that
 follows it sit at **800 Hz audio** — the beacon network's own listening
-convention. The four PI4 tones straddle that point, half a tone-spacing
-either side of it, and the decoder's frequency search is centred on exactly
-where the convention puts them. A beacon on a wider channel (PI4-80, PI4-96,
-PI4-120 — 2 or 3 kHz spacing rather than the standard 1 kHz) needs a wider
-receive passband to keep its top tone inside it; the panel's default covers
-the standard variant with room to spare.
+convention. The lowest two PI4 tones straddle that point, half a tone-spacing
+either side of it, and the other two climb above it — for the standard
+variant, tones at roughly 683, 917, 1152 and 1386 Hz. The decoder's frequency
+search is centred on exactly where the convention puts them. A beacon on a
+wider channel (PI4-80, PI4-96, PI4-120 — 2 or 3 kHz spacing rather than the
+standard 1 kHz) needs a wider receive passband to keep its top tone inside
+it; the panel's default covers the standard variant with room to spare.
 
 #### Receiving
 
