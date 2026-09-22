@@ -2990,6 +2990,11 @@ struct Engine {
     relay_pending: bool,
     /// Whether the lead cap has already been complained about this session.
     relay_lead_capped: bool,
+    /// The receive and transmit dials, and the bands they were in, last told
+    /// to the T/R switch's band decoder (issue #442) — see
+    /// [`Engine::tell_tr_switch_bands`]. The dials are kept so an unmoved one
+    /// costs a comparison per tick rather than a band-plan lookup.
+    relay_bands_told: Option<(f64, f64, sdroxide_types::Band, sdroxide_types::Band)>,
     /// What was last written to `session.json`, so the periodic check only
     /// touches the disk when the operator has actually moved. `None` when this
     /// engine does not remember its session (see
@@ -4206,6 +4211,7 @@ fn engine_thread(
         relay_last_status: None,
         relay_pending: false,
         relay_lead_capped: false,
+        relay_bands_told: None,
         rotator: None,
         rot_last_status: None,
         next_rot_emit: Instant::now(),
@@ -12193,6 +12199,10 @@ impl Engine {
     /// Capped, because an operator who types 500 ms should get a switch that
     /// works and not a radio that stutters.
     fn lead_tr_switch(&mut self) {
+        // The dial may have moved since the last tick — a split set in the
+        // same batch of commands as the key-down — and the band decoder's TX
+        // word has to be this over's.
+        self.tell_tr_switch_bands();
         let Some(hub) = self.tr_switch.as_ref() else { return };
         let wait = hub.key(self.instance);
         if wait.is_zero() {
@@ -12221,6 +12231,9 @@ impl Engine {
     /// comparison — see [`crate::TrSwitch::publish`].
     fn poll_tr_switch(&mut self) {
         let Some(hub) = self.tr_switch.clone() else { return };
+        // Before `publish`, which may be the key-down for an over this engine
+        // did not drive, and brings this radio's transmit band with it.
+        self.tell_tr_switch_bands();
         hub.publish(self.instance, self.on_air());
 
         // A transmitter out in the shack keyed itself, and the sense line saw
@@ -12246,6 +12259,34 @@ impl Engine {
                 let _ = self.event_tx.send(RadioEvent::RelayStatus(Box::new(st)));
             }
         }
+    }
+
+    /// Tell the T/R switch's band decoder (issue #442) which bands this
+    /// radio's dials are in: every engine its transmit band, since whichever
+    /// radio keys brings its own; the primary its receive band too, since the
+    /// bank belongs to the station and not to any one receiver.
+    ///
+    /// Bands only. Which word a contact follows, and when it swaps its RX
+    /// word for its TX word, is the relay worker's decision, made from the
+    /// station-wide on-air state inside the same lead and hold as every other
+    /// contact — never here, where it would arrive after the key-down's lead
+    /// had already been served.
+    fn tell_tr_switch_bands(&mut self) {
+        let Some(hub) = self.tr_switch.as_ref() else { return };
+        let (rx_hz, tx_hz) = (self.state.rx_freq_hz(), self.state.tx_freq_hz());
+        let told = self.relay_bands_told;
+        if matches!(told, Some((r, t, _, _)) if r == rx_hz && t == tx_hz) {
+            return;
+        }
+        let rx = sdroxide_types::Band::containing(rx_hz);
+        let tx = sdroxide_types::Band::containing(tx_hz);
+        if self.primary && told.map(|t| t.2) != Some(rx) {
+            hub.set_rx_band(rx);
+        }
+        if told.map(|t| t.3) != Some(tx) {
+            hub.set_tx_band(self.instance, tx);
+        }
+        self.relay_bands_told = Some((rx_hz, tx_hz, rx, tx));
     }
 
     fn emit_relay_status(&mut self) {

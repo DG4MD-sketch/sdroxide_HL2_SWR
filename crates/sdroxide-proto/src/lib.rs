@@ -1442,7 +1442,17 @@ use sdroxide_types::{
 /// tail, the same shape `wspr` already has, and `DigiStatus` rides whole, so
 /// a v163 peer reads the extra bytes as the start of the next field and
 /// fails to decode every digital status.
-pub const PROTO_VERSION: u16 = 164;
+///
+/// v165: band-decoder relay outputs (issue #442) — the HPSDR OC table's idea
+/// (a per-band RX/TX output word), generalised to the generic T/R-switch
+/// relay bank so a USB relay board, GPIO header, HID relay or external
+/// command can switch an outboard filter or transverter by band too, not
+/// only HPSDR's own seven-pin bus. `RelayRole` gains `BandDecoder`, appended,
+/// so no surviving discriminant moves; `RelayConfig` gains
+/// `band_table: Vec<RelayBandRow>` on its tail, and `RelayConfig` rides
+/// whole inside `Command::SetRelayConfig`, so a v164 peer reads the extra
+/// bytes as the start of the next field and fails to decode the command.
+pub const PROTO_VERSION: u16 = 165;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]
