@@ -3215,11 +3215,8 @@ impl SdroxideApp {
     /// Stop the MP3 recording when its "stop after" deadline passes. Runs once
     /// a frame; the deadline itself is armed by the REC popup's chips.
     pub(in crate::app) fn poll_recording_timer(&mut self, cmds: &mut Vec<Command>) {
-        let (stop_at, stop) = rec_timer_tick(
-            crate::time::now_unix(),
-            self.recording_stop_at,
-            self.state.recording,
-        );
+        let (stop_at, stop) =
+            rec_timer_tick(crate::time::now_unix(), self.recording_stop_at, self.state.recording);
         self.recording_stop_at = stop_at;
         if stop {
             cmds.push(Command::SetRecording(false));
@@ -3311,9 +3308,7 @@ impl SdroxideApp {
                     let secs = i64::from(minutes) * 60;
                     let armed = self.recording_stop_at.is_some_and(|at| at - now == secs);
                     if crate::chrome::chip(ui, armed, format!("{minutes} min"))
-                        .on_hover_text(format!(
-                            "Stop the MP3 recording after {minutes} minutes"
-                        ))
+                        .on_hover_text(format!("Stop the MP3 recording after {minutes} minutes"))
                         .clicked()
                     {
                         arm = Some(now + secs);
@@ -5617,11 +5612,7 @@ fn rec_timer_tick(now: i64, stop_at: Option<i64>, recording: bool) -> (Option<i6
     if !recording {
         return (None, false);
     }
-    if now >= at {
-        (None, true)
-    } else {
-        (Some(at), false)
-    }
+    if now >= at { (None, true) } else { (Some(at), false) }
 }
 
 fn tx_rows_w_for(ui: &egui::Ui, keyer: bool, side_col_w: f32) -> f32 {
