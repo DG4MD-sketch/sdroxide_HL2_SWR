@@ -474,6 +474,14 @@ pub struct SdroxideApp {
     navtex_open: Option<usize>,
     nr_popup_since: Option<f64>,
     rec_popup_since: Option<f64>,
+    /// When the running MP3 recording should stop, Unix UTC seconds, armed by
+    /// the REC popup's "stop after" chips. UI-owned: the engine's
+    /// [`sdroxide_types::Command::SetRecording`] carries no deadline, so this
+    /// is a per-tab timer ticked once a frame rather than a setting, and it
+    /// does not survive a restart — which is fine for a "this over"
+    /// convenience (issue #520). Cleared when the recording stops for any
+    /// reason.
+    recording_stop_at: Option<i64>,
     /// Fade clock for the receive-filter popup behind the BW chip, like
     /// `nr_popup_since`.
     bw_popup_since: Option<f64>,
@@ -1368,6 +1376,7 @@ impl SdroxideApp {
             navtex_open: None,
             nr_popup_since: None,
             rec_popup_since: None,
+            recording_stop_at: None,
             bw_popup_since: None,
             duplex_popup_since: None,
             rpt_tone_popup_since: None,
