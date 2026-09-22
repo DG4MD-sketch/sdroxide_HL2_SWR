@@ -16945,6 +16945,26 @@ impl Engine {
         if offset <= 0.0 {
             return 0.0;
         }
+        // FM HD Radio needs no guard, and sized from its channel the guard did
+        // harm. That channel is nrsc5's 744 kHz sample rate, so on an RSPdx at
+        // 2 Msps the guard came to 400 kHz and CTR left the dial a fifth of the
+        // window below centre. What it protects is not there: the digital
+        // carriers sit at +/-129 to +/-198 kHz, and the middle of the channel is
+        // the analog FM, which nrsc5 does not decode from — so the DC spike on
+        // the carrier lands in the part nobody reads. Measured on an RSPdx
+        // against CITE-FM 107.3 and WVPS 107.9: MER 12.3/12.2 and 14.1/14.0 dB
+        // with the LO clear of the signal, 12.4/12.3 and 14.1/14.0 with it on
+        // the carrier, CBER 0 throughout, and the two sidebands kept matching,
+        // which a zero-IF image mirroring one onto the other would have broken.
+        //
+        // Exempted here rather than in `guarded_center`, because
+        // `keep_vfo_in_span` reads the same guard on every pass and would
+        // otherwise retune the LO straight back off the carrier. HD on AM keeps
+        // its guard: the innermost digital carriers there sit within a few kHz
+        // of the carrier, under the analog audio.
+        if self.state.rx[0].mode == Mode::HdRadio && !hd_radio_is_am(self.state.rx_freq_hz()) {
+            return 0.0;
+        }
         let channel = self.main.as_ref().map(|c| c.channel_rate()).unwrap_or(48_000.0);
         (channel * 0.6).min(offset * 0.8)
     }
