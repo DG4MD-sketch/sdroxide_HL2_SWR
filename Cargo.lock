@@ -4977,6 +4977,7 @@ dependencies = [
  "mfsk-core",
  "num-complex",
  "rayon",
+ "rustfft",
  "sdroxide-aprs",
  "sdroxide-atchat",
  "sdroxide-ax25",

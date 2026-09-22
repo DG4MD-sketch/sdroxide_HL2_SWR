@@ -736,6 +736,11 @@ pub struct SdroxideApp {
     /// [`crate::app::panels::wspr::WSPR_SPOT_ROWS`]; the propagation store keeps
     /// the long view, this is only what the panel lists.
     wspr_spots: Vec<sdroxide_types::WsprSpot>,
+    /// PI4 receptions, newest first — what this station decoded. Capped at
+    /// [`crate::app::panels::pi4::PI4_SPOT_ROWS`]. No propagation-store
+    /// counterpart, unlike `wspr_spots`: a PI4 message carries no grid
+    /// square, so there is no path to fold into the map.
+    pi4_spots: Vec<sdroxide_types::Pi4Spot>,
     /// Location of the decode row hovered this frame, shown on the map as a
     /// bright yellow dot. Frame-scoped (set by the decode list, read by the map).
     digi_hover_ll: Option<(f64, f64)>,
@@ -1456,6 +1461,7 @@ impl SdroxideApp {
             prop: Default::default(),
             prop_heat: Default::default(),
             wspr_spots: Vec::new(),
+            pi4_spots: Vec::new(),
             digi_hover_ll: None,
             digi_free_text: String::new(),
             flags: Default::default(),

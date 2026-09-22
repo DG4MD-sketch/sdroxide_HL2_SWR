@@ -89,7 +89,12 @@ pub fn make_modulator(mode: Mode, rate: f64, passband: (f32, f32)) -> Option<Box
         // system. There is no amateur DRM transmission to make, and a
         // receiver that could key one has no business doing so. HD Radio is
         // the same — a broadcast system, receive only.
-        Mode::Cw
+        // PI4 is receive only here — a decoder for a beacon network's
+        // signal, not a beacon implementation (see `Mode::Pi4`'s own doc
+        // comment) — so like ACARS and ISB it has no modulator to transmit
+        // with.
+        Mode::Pi4
+        | Mode::Cw
         | Mode::Wfm
         | Mode::Spec
         | Mode::Drm

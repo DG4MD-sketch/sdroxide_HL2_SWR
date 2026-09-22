@@ -562,6 +562,7 @@ impl CwController {
             clock_offset_s: None,
             cw: Some(self.cw_status()),
             wspr: None,
+            pi4: None,
             qso: None,
         }
     }

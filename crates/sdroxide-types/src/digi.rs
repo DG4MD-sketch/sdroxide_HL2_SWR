@@ -516,6 +516,10 @@ pub struct DigiStatus {
     /// will take it next. `None` in every other mode, as `cw` and `js8` are.
     #[serde(default)]
     pub wspr: Option<crate::WsprStatus>,
+    /// PI4: where the one-minute beacon cycle is, and whether this slot's
+    /// audio is still being searched. `None` in every other mode.
+    #[serde(default)]
+    pub pi4: Option<crate::Pi4Status>,
     /// The contact in progress, beyond the callsign and grid above. `None`
     /// whenever no station is being worked. See [`QsoLive`].
     #[serde(default)]
@@ -1048,6 +1052,7 @@ impl DigiStatus {
             clock_offset_s: None,
             cw: None,
             wspr: None,
+            pi4: None,
             qso: None,
         }
     }

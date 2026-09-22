@@ -1435,7 +1435,14 @@ use sdroxide_types::{
 /// `CwStatus`'s tail, after `rig_keys_itself`; `CwStatus` rides inside
 /// `DigiStatus`, which crosses whole, so a v162 peer reads the extra bytes as
 /// the start of the next field and fails to decode every digital status.
-pub const PROTO_VERSION: u16 = 163;
+///
+/// v164: PI4, the "Next Generation Beacon" propagation-beacon mode.
+/// `Mode::Pi4` is appended, as is `ServerMsg::Pi4Spots`, so no surviving
+/// discriminant moves; `DigiStatus` gained `pi4: Option<Pi4Status>` on its
+/// tail, the same shape `wspr` already has, and `DigiStatus` rides whole, so
+/// a v163 peer reads the extra bytes as the start of the next field and
+/// fails to decode every digital status.
+pub const PROTO_VERSION: u16 = 164;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]
@@ -1888,6 +1895,12 @@ pub enum ServerMsg {
     ///
     /// Appended last, for the usual reason.
     Profiles(Vec<String>),
+    /// `RadioEvent::Pi4Spots`: what a PI4 slot decoded — the same shape of
+    /// thing [`ServerMsg::WsprSpots`] is, for the same reason: a beacon
+    /// reception is a measurement, not a message addressed to anyone.
+    ///
+    /// Appended last, for the usual reason.
+    Pi4Spots(Vec<sdroxide_types::Pi4Spot>),
 }
 
 /// One radio in a station's roster, as a client sees it.

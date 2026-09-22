@@ -383,6 +383,12 @@ pub enum RadioEvent {
     ///
     /// Appended last, for the usual reason.
     Profiles(Vec<String>),
+    /// What a PI4 slot decoded — the same shape of thing
+    /// [`RadioEvent::WsprSpots`] is, for the same reason: a beacon reception
+    /// is a measurement, not a message addressed to anyone.
+    ///
+    /// Appended last, for the usual reason.
+    Pi4Spots(Vec<crate::Pi4Spot>),
 }
 
 /// Snapshot of the frontend's switchable sound devices (native clients).

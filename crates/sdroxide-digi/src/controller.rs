@@ -136,6 +136,11 @@ pub enum DigiAction {
     SendCw { text: String, seconds: f32 },
     /// Stop CW the rig is part way through sending.
     AbortCw,
+    /// PI4: what a completed one-minute cycle's search decoded.
+    ///
+    /// Not `Decodes`, for the same reason [`DigiAction::WsprSpots`] is not: a
+    /// beacon reception is a measurement, not a message addressed to anyone.
+    Pi4Spots(Vec<sdroxide_types::Pi4Spot>),
 }
 
 struct DecodeJob {
