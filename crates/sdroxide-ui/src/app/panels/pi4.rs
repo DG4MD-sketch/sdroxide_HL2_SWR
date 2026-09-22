@@ -113,7 +113,13 @@ impl SdroxideApp {
             crate::chrome::row_tail(ui, |ui| {
                 let left = (timing.slot_s - into_slot).max(0.0).round() as i64;
                 ui.label(
-                    RichText::new(format!("0:{left:02}")).size(10.5).color(crate::theme::gray(140)),
+                    // Minutes and seconds the way `wspr.rs` writes them, not a
+                    // hard-coded "0:" — a full minute left is 1:00, and a
+                    // one-minute cycle reads that for the first half second of
+                    // every slot.
+                    RichText::new(format!("{}:{:02}", left / 60, left % 60))
+                        .size(10.5)
+                        .color(crate::theme::gray(140)),
                 )
                 .on_hover_text(
                     "Time left in this one-minute beacon cycle. The PI4 message is searched for \
