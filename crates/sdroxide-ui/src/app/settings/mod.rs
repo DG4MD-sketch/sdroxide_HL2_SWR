@@ -1808,11 +1808,12 @@ impl SdroxideApp {
 
         match io.tab {
             SettingsTab::General => {
-                // Which build this is, taken from the crate metadata at compile
-                // time — so a bug report can name the version without the
-                // operator having to find the binary.
+                // Which build this is — so a bug report can name the version
+                // without the operator having to find the binary. Stamped, so
+                // a nightly says so here rather than naming the release it was
+                // cut from; a release reads exactly as it always did.
                 ui.label(
-                    RichText::new(format!("SDRoxide {}", env!("CARGO_PKG_VERSION")))
+                    RichText::new(format!("SDRoxide {}", sdroxide_version::VERSION))
                         .size(15.0)
                         .strong(),
                 );

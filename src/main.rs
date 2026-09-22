@@ -37,7 +37,10 @@ use sdroxide_radio::{DeviceInfo, SoapyDevice, enumerate_devices};
 use sdroxide_types::{Backend, DeviceCaps, FobosPort, IcomNetConfig, RadioConfig};
 
 #[derive(Parser, Debug, Clone)]
-#[command(version, about)]
+// A bare `version` would take the crate version, which cannot tell a nightly
+// apart from the release it was cut from — and `--version` is the first thing
+// asked of a build whose provenance is in doubt. See `sdroxide-version`.
+#[command(version = sdroxide_version::VERSION, about)]
 struct Cli {
     /// SoapySDR device args, e.g. "driver=hackrf" (default: config, then first device)
     #[arg(long)]

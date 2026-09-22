@@ -337,7 +337,7 @@ impl eframe::App for SdroxideApp {
                         ui.label(
                             RichText::new(format!(
                                 "SDRoxide {version} has been released — this is {}.",
-                                env!("CARGO_PKG_VERSION")
+                                sdroxide_version::VERSION
                             ))
                             .size(13.0)
                             .color(ink),

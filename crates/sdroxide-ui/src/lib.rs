@@ -246,7 +246,7 @@ pub fn install_renderer_panic_note() {
                 &path,
                 format!(
                     "sdroxide {} died in the graphics driver.\n\nat {at}\n{msg}\n\n                     Delete this file to use the default renderer again.\n",
-                    env!("CARGO_PKG_VERSION"),
+                    sdroxide_version::VERSION,
                 ),
             );
         }

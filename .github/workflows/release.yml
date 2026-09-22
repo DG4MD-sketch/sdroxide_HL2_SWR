@@ -26,37 +26,6 @@ env:
   CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
 jobs:
-  # Build the wasm web client once; every native build embeds the same dist.
-  web:
-    name: web client (wasm)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: web-dist
-      - name: Install trunk
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          curl -sSfL https://github.com/trunk-rs/trunk/releases/download/v0.21.14/trunk-x86_64-unknown-linux-gnu.tar.gz \
-            | tar -xzf - -C "$HOME/.local/bin"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Build web client
-        working-directory: crates/sdroxide-web
-        run: trunk build --release
-      - uses: actions/upload-artifact@v7
-        with:
-          name: web-dist
-          path: crates/sdroxide-web/dist
-          if-no-files-found: error
-          # A nightly is superseded the next night, so it need not sit on the
-          # run page for the repository's default 90 days. 0 means "use the
-          # default", which is what a tagged or manual run keeps.
-          retention-days: ${{ github.event_name == 'schedule' && 14 || 0 }}
-
   # Which build combinations this run wants. A tag or a manual run builds all
   # fourteen; the nightly builds four — the standard (non-SoapySDR) variant of
   # the platforms most people run. A scheduled run publishes nothing (`release`
@@ -75,6 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       combos: ${{ steps.pick.outputs.combos }}
+      stamp: ${{ steps.pick.outputs.stamp }}
     steps:
       - id: pick
         run: |
@@ -123,12 +93,67 @@ jobs:
           echo "combos=$combos" >> "$GITHUB_OUTPUT"
           echo "$combos" | jq .
 
+          # What this build should call itself. A tag is a release and keeps the
+          # bare crate version; anything else says which build it is and which
+          # commit it came from, so `sdroxide --version`, the About box and a
+          # crash report name the build rather than the release it was cut
+          # from. `sdroxide-version`'s build script reads this; unset (a local
+          # `cargo build`) means the plain version. Both the wasm client and
+          # every native build take it from here so they agree.
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            stamp=""
+          elif [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
+            stamp="nightly.$(date -u +%Y%m%d).${GITHUB_SHA::7}"
+          else
+            stamp="dev.${GITHUB_SHA::7}"
+          fi
+          echo "stamp=$stamp" >> "$GITHUB_OUTPUT"
+          echo "build stamp: ${stamp:-<none, release>}"
+
+  # Build the wasm web client once; every native build embeds the same dist.
+  web:
+    name: web client (wasm)
+    needs: targets
+    runs-on: ubuntu-latest
+    # So the About box in a browser client agrees with the server that served
+    # it, rather than naming the release the nightly was cut from.
+    env:
+      SDROXIDE_BUILD: ${{ needs.targets.outputs.stamp }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: web-dist
+      - name: Install trunk
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSfL https://github.com/trunk-rs/trunk/releases/download/v0.21.14/trunk-x86_64-unknown-linux-gnu.tar.gz \
+            | tar -xzf - -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Build web client
+        working-directory: crates/sdroxide-web
+        run: trunk build --release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web-dist
+          path: crates/sdroxide-web/dist
+          if-no-files-found: error
+          # A nightly is superseded the next night, so it need not sit on the
+          # run page for the repository's default 90 days. 0 means "use the
+          # default", which is what a tagged or manual run keeps.
+          retention-days: ${{ github.event_name == 'schedule' && 14 || 0 }}
+
   build:
     name: ${{ matrix.label }} (${{ matrix.variant }})
     needs: [web, targets]
     runs-on: ${{ matrix.os }}
     # Empty for every non-compat entry, which means "no container".
     container: ${{ matrix.container }}
+    env:
+      SDROXIDE_BUILD: ${{ needs.targets.outputs.stamp }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.targets.outputs.combos) }}

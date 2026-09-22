@@ -95,6 +95,9 @@ opt-level = 2
 
 [workspace.dependencies]
 sdroxide-types = { path = "crates/sdroxide-types" }
+# The build stamp. No dependencies and no build inputs beyond one
+# environment variable, so it builds for wasm32 alongside everything else.
+sdroxide-version = { path = "crates/sdroxide-version" }
 sdroxide-proto = { path = "crates/sdroxide-proto" }
 sdroxide-dsp = { path = "crates/sdroxide-dsp" }
 sdroxide-atchat = { path = "crates/sdroxide-atchat" }
@@ -188,6 +191,7 @@ description = "PowerSDR/Thetis-style SDR transceiver with a native GUI, a browse
 
 [dependencies]
 sdroxide-types.workspace = true
+sdroxide-version.workspace = true
 sdroxide-proto.workspace = true
 sdroxide-dsp.workspace = true
 sdroxide-radio = { path = "crates/sdroxide-radio", default-features = false }

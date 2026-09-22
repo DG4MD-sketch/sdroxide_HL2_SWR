@@ -4820,6 +4820,7 @@ dependencies = [
  "sdroxide-tci",
  "sdroxide-types",
  "sdroxide-ui",
+ "sdroxide-version",
  "tracing",
  "tracing-subscriber",
 ]
@@ -5548,6 +5549,7 @@ dependencies = [
  "sdroxide-solar",
  "sdroxide-speech",
  "sdroxide-types",
+ "sdroxide-version",
  "serde",
  "tracing",
  "wasm-bindgen",
@@ -5566,6 +5568,10 @@ dependencies = [
  "sdroxide-types",
  "tracing",
 ]
+
+[[package]]
+name = "sdroxide-version"
+version = "1.6.8"
 
 [[package]]
 name = "sdroxide-web"
