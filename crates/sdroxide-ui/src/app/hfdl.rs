@@ -215,7 +215,19 @@ impl SdroxideApp {
 /// The decoder's own state, as fixed-width slots so nothing reflows the header
 /// when a number grows a digit. The aircraft count is the map's table, not the
 /// status's: it outlives the log's rolling window.
+///
+/// One row. The slots were always sized to sit side by side, but the panel's
+/// layout is vertical, so each allocation took a line of its own and the strip
+/// came out as five short lines with the width of the panel empty beside them.
+/// Wrapped here rather than at the call site so the function keeps its own
+/// shape wherever it is used; `horizontal_wrapped` rather than `horizontal` so
+/// a panel too narrow for all five folds them instead of running them off the
+/// edge.
 fn hfdl_status_strip(ui: &mut egui::Ui, status: Option<&HfdlStatus>, aircraft: usize) {
+    ui.horizontal_wrapped(|ui| hfdl_status_slots(ui, status, aircraft));
+}
+
+fn hfdl_status_slots(ui: &mut egui::Ui, status: Option<&HfdlStatus>, aircraft: usize) {
     let (running, level, bursts, decodes) = match status {
         Some(s) => (s.running, Some(s.level_dbfs), s.bursts, s.decodes),
         None => (false, None, 0, 0),
@@ -358,6 +370,31 @@ mod tests {
             details: r#"{"aircraft":"A9C-DM"}"#.to_string(),
             position: None,
         }
+    }
+
+    /// The status slots are sized to sit side by side, but a panel lays out
+    /// vertically — so without a horizontal layout each took a line of its own
+    /// and the header came out five lines tall with the panel's width empty
+    /// beside it. Measured, because "it looks right" is what let it ship.
+    #[test]
+    fn the_status_strip_is_one_row() {
+        let status = HfdlStatus {
+            running: true,
+            level_dbfs: -59.0,
+            bursts: 30,
+            decodes: 44,
+            ..Default::default()
+        };
+        let mut tall = 0.0;
+        egui::__run_test_ui(|ui| {
+            let before = ui.min_rect().height();
+            hfdl_status_strip(ui, Some(&status), 3);
+            tall = ui.min_rect().height() - before;
+        });
+        // One row of 16pt slots, plus whatever the style puts around it. Five
+        // rows could not fit under this however the spacing is set.
+        assert!(tall > 0.0, "the strip drew nothing, so this measures nothing");
+        assert!(tall < 40.0, "the status strip is {tall} points tall — it has stacked again");
     }
 
     #[test]
