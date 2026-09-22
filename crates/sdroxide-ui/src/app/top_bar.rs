@@ -3212,6 +3212,20 @@ impl SdroxideApp {
         }
     }
 
+    /// Stop the MP3 recording when its "stop after" deadline passes. Runs once
+    /// a frame; the deadline itself is armed by the REC popup's chips.
+    pub(in crate::app) fn poll_recording_timer(&mut self, cmds: &mut Vec<Command>) {
+        let (stop_at, stop) = rec_timer_tick(
+            crate::time::now_unix(),
+            self.recording_stop_at,
+            self.state.recording,
+        );
+        self.recording_stop_at = stop_at;
+        if stop {
+            cmds.push(Command::SetRecording(false));
+        }
+    }
+
     /// What the REC chip opens: one row per thing that can be recorded.
     ///
     /// A popup rather than a toggle because there are two answers and neither
@@ -3281,6 +3295,54 @@ impl SdroxideApp {
         });
         if let Some(f) = &self.state.recording_file {
             ui.label(RichText::new(f).size(9.5).color(crate::theme::CYAN_DIM()));
+        }
+
+        // Auto-stop: "record for the next N minutes". The deadline is armed
+        // here and ticked once a frame by `poll_recording_timer` — it never
+        // rides the engine's SetRecording, so a stop armed for one recording
+        // cannot leak into the next one the operator starts (issue #520).
+        if audio {
+            crate::chrome::menu_caption(ui, "Stop after");
+            ui.horizontal_wrapped(|ui| {
+                let now = crate::time::now_unix();
+                let mut arm: Option<i64> = None;
+                let mut cancel = false;
+                for minutes in [15, 30, 45, 60, 90] {
+                    let secs = i64::from(minutes) * 60;
+                    let armed = self.recording_stop_at.is_some_and(|at| at - now == secs);
+                    if crate::chrome::chip(ui, armed, format!("{minutes} min"))
+                        .on_hover_text(format!(
+                            "Stop the MP3 recording after {minutes} minutes"
+                        ))
+                        .clicked()
+                    {
+                        arm = Some(now + secs);
+                    }
+                }
+                if self.recording_stop_at.is_some()
+                    && crate::chrome::chip(ui, false, "no stop").clicked()
+                {
+                    cancel = true;
+                }
+                if let Some(at) = arm {
+                    self.recording_stop_at = Some(at);
+                    // The countdown label below has to keep being redrawn.
+                    crate::repaint::schedule_ms(ui.ctx(), 1_000);
+                } else if cancel {
+                    self.recording_stop_at = None;
+                }
+                if let Some(at) = self.recording_stop_at {
+                    let left = (at - now).max(0);
+                    ui.label(
+                        RichText::new(format!("stops in {}:{:02}", left / 60, left % 60))
+                            .size(11.0)
+                            .color(crate::theme::ALERT()),
+                    );
+                    if left > 0 {
+                        crate::repaint::schedule_ms(ui.ctx(), 1_000);
+                    }
+                }
+            });
         }
 
         crate::chrome::menu_caption(ui, "Record spectrum");
@@ -5543,6 +5605,25 @@ fn iq_recording_caption(mb: u32, rate_hz: f64) -> String {
     format!("{mb} MB · {}:{:02}", total / 60, total % 60)
 }
 
+/// The auto-stop deadline's decision for one frame: `(deadline to keep, whether
+/// the MP3 recording should stop now)`.
+///
+/// `stop_at` is Unix UTC seconds. A deadline is dropped as soon as the
+/// recording is no longer running, so a stop that arrives from the operator's
+/// chip or anywhere else never double-fires the recorder, and an armed stop
+/// cannot leak into the recording that comes after the one it was set for.
+fn rec_timer_tick(now: i64, stop_at: Option<i64>, recording: bool) -> (Option<i64>, bool) {
+    let Some(at) = stop_at else { return (None, false) };
+    if !recording {
+        return (None, false);
+    }
+    if now >= at {
+        (None, true)
+    } else {
+        (Some(at), false)
+    }
+}
+
 fn tx_rows_w_for(ui: &egui::Ui, keyer: bool, side_col_w: f32) -> f32 {
     let (row1, row2) = tx_rows_fixed_w(ui, keyer);
     row1.max(row2)
@@ -6475,6 +6556,25 @@ mod tests {
         // The minute must only roll at the top of the minute, not before.
         assert_eq!(iq_recording_caption(119, RATE), "119 MB · 1:59");
         assert_eq!(iq_recording_caption(120, RATE), "120 MB · 2:00");
+    }
+
+    /// The auto-stop deadline fires once, only while recording, and only at or
+    /// after `stop_at` — and it is dropped (not fired) the moment the
+    /// recording stops some other way, so a manual stop or an engine-side
+    /// error never prompts a second `SetRecording(false)`.
+    #[test]
+    fn rec_timer_fires_once_and_only_while_recording() {
+        // No deadline armed: nothing to keep, nothing to fire.
+        assert_eq!(rec_timer_tick(1000, None, true), (None, false));
+        // Armed and still running: kept, not fired before its time.
+        assert_eq!(rec_timer_tick(1000, Some(1060), true), (Some(1060), false));
+        // At and after the deadline, while recording: fired, and cleared.
+        assert_eq!(rec_timer_tick(1060, Some(1060), true), (None, true));
+        assert_eq!(rec_timer_tick(2000, Some(1060), true), (None, true));
+        // The recording stopped first: the deadline is cleared with no fire,
+        // so an armed stop can never kill a later recording it was not set
+        // for.
+        assert_eq!(rec_timer_tick(2000, Some(1060), false), (None, false));
     }
 
     /// Walk a chip through a sequence of pointer edges, collecting the PTT
