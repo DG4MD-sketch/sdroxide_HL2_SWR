@@ -198,7 +198,19 @@ impl DigiEngine for Pi4Controller {
                         actions.push(DigiAction::Pi4Spots(spots));
                     }
                 }
-                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Empty) => break,
+                // The worker is gone and no answer is ever coming. Release
+                // the slot rather than leaving it outstanding: `pending` is
+                // what gates the next submission as well as what the panel
+                // shows, so holding it would wedge the controller at
+                // "decoding…" for the rest of the session instead of simply
+                // decoding nothing.
+                Err(TryRecvError::Disconnected) => {
+                    if self.pending.take().is_some() {
+                        self.status_dirty = true;
+                    }
+                    break;
+                }
             }
         }
 
