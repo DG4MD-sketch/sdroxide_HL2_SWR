@@ -69,7 +69,9 @@ One binary, three ways to run it:
   **PSK31**, **RTTY**,
   **Olivia**, **THOR** and **FSQ** (with directed messaging + images),
   **WSPR** (transmit and receive, with WSPRnet reporting and optional band
-  hopping),
+  hopping), receive-only **PI4** (the "Next Generation Beacon" propagation
+  mode — 4-FSK, decoded from a rate-1/2 K=32 Fano search across every beacon
+  variant and tone frequency the network uses),
   **Hellschreiber** (all seven Feld Hell / FSK Hell variants, on a scrolling
   raster), image **SSTV** (Scottie, Martin, Robot), image **RIFP**
   (draft-dulaunoy-rifp-00 — packetised, checksummed pictures over a 4800-baud
@@ -191,6 +193,26 @@ paths rather than a conversation.
 - Transmitting needs a plain callsign and a 4-character locator — the 50-bit
   message has room for nothing else. A compound call or a 6-character grid is
   said plainly rather than mangled; receiving is unaffected.
+
+## PI4
+
+Selecting **PI4** opens a reception list beside a status pane showing the
+one-minute beacon cycle. Like WSPR it is not a QSO mode — a beacon transmits
+its callsign (or occasionally a status string) and nothing else — but unlike
+WSPR it is receive only here: this is a decoder for the "Next Generation
+Beacon" network, not a beacon implementation.
+
+- **Receive** searches once a minute across four beacon-spacing variants
+  (PI4, PI4-80, PI4-96, PI4-120), a tone-frequency window either side of the
+  network's own listening convention, and a couple of seconds either side of
+  the nominal minute boundary for clock drift. Each row is a beacon heard,
+  with its variant, signal estimate, and a **fit** figure — the message's
+  FEC carries no checksum, so fit (how much of the received tone energy the
+  decoded message actually accounts for) is what stands between a real
+  decode and a plausible-looking guess out of noise, not a bare pass/fail.
+- Tune so the beacon's CW identification and carrier sit at 800 Hz audio —
+  the network's own convention — and the four PI4 tones land where the
+  decoder searches for them by default.
 
 ## Propagation heat map
 
@@ -1531,7 +1553,7 @@ way.
 | `--freq <HZ>` | Center frequency in Hz (default: where the last session was left; `14200000` on a first run). |
 | `--rate <HZ>` | Sample rate in Hz (default: from config). |
 | `--gain <DB>` | Overall RX gain in dB (default: hardware AGC / moderate). |
-| `--mode <MODE>` | Initial mode, case-insensitive: `LSB USB CW AM SAM NFM WFM DRM ADS-B VDL2 AIS DIGU DIGL DSB ISB SPEC FT8 FT4 FT2 JS8 WSPR PSK RTTY RTTY-FM PACKET PACKET-HF APRS SSTV SSTV-FM RIFP WEFAX NAVTEX ACARS OLIVIA THOR FSQ ATCHAT HELL RFPAINT RADE HFDL`, and `"HD RADIO"` (the one name with a space in it, so it needs the quotes). Default: the mode the last session was left in. |
+| `--mode <MODE>` | Initial mode, case-insensitive: `LSB USB CW AM SAM NFM WFM DRM ADS-B VDL2 AIS DIGU DIGL DSB ISB SPEC FT8 FT4 FT2 JS8 WSPR PI4 PSK RTTY RTTY-FM PACKET PACKET-HF APRS SSTV SSTV-FM RIFP WEFAX NAVTEX ACARS OLIVIA THOR FSQ ATCHAT HELL RFPAINT RADE HFDL`, and `"HD RADIO"` (the one name with a space in it, so it needs the quotes). Default: the mode the last session was left in. |
 | `--antenna <NAME>` | RX antenna port, as the device names it (`LNAH`, `TX/RX`; see `--probe`). Default: the port the last session was left on. |
 | `--tx-antenna <NAME>` | TX antenna port, likewise (`BAND1`, `BAND2`). |
 | `--server` | Run as a server: HTTP web client + WebSocket streaming backend. |

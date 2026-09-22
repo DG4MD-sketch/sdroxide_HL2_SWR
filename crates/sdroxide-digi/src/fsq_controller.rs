@@ -220,6 +220,7 @@ impl FsqController {
             clock_offset_s: None,
             cw: None,
             wspr: None,
+            pi4: None,
             qso: None,
         }
     }

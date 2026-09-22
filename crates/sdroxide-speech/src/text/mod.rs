@@ -154,6 +154,8 @@ impl<'a> Speaker<'a> {
             Mode::Js8 => "J S eight",
             // Pronounced "whisper" — the joke the name is built on.
             Mode::Wspr => "whisper",
+            // Spelt out like "F T eight" and "J S eight" above.
+            Mode::Pi4 => "P I four",
             Mode::Drm => "D R M",
             Mode::HdRadio => "H D radio",
             Mode::Adsb => "A D S B",

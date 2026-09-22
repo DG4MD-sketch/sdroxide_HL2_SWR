@@ -35,6 +35,7 @@ mod memory;
 mod meters;
 mod mode;
 mod netcfg;
+mod pi4;
 mod pictures;
 mod probe;
 mod profile;
@@ -177,6 +178,7 @@ pub use pictures::{
     IMAGE_THUMB_EDGE, IMAGE_UPLOAD_MAX, ImageEntry, ImageKind, ImageListing, ImagePresets,
     ImageSlotInfo, received_at, safe_name,
 };
+pub use pi4::{BURST_S as PI4_BURST_S, Pi4Spot, Pi4Status, SLOT_S as PI4_SLOT_S};
 pub use probe::{DeviceProbe, ProbeAnswer, ProbeTest, ReportKind, TestKind};
 pub use profile::{ModeProfile, ModeProfiles};
 pub use prop_store::{PropSources, PropStore};

@@ -169,6 +169,7 @@ fn build_status(cfg: &DigiConfig, session: &AtChatSession) -> DigiStatus {
         clock_offset_s: None,
         cw: None,
         wspr: None,
+        pi4: None,
         qso: None,
     }
 }

@@ -154,6 +154,7 @@ impl HellController {
             clock_offset_s: None,
             cw: None,
             wspr: None,
+            pi4: None,
             qso: None,
         }
     }

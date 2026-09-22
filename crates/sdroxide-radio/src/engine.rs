@@ -19,8 +19,8 @@ use sdroxide_config::BandStacks;
 use sdroxide_digi::{
     AcarsController, AprsController, AtChatController, CwController, DigiAction, DigiController,
     DigiEngine, FsqController, HellController, Js8Controller, NavtexController, PacketController,
-    RadeController, RfPaintController, RifpController, SstvController, TextModemController,
-    WefaxController, WsprController,
+    Pi4Controller, RadeController, RfPaintController, RifpController, SstvController,
+    TextModemController, WefaxController, WsprController,
 };
 use sdroxide_drm::DrmDemod;
 use sdroxide_dsp::{
@@ -6457,6 +6457,12 @@ impl Engine {
                     self.spots.wspr_report(&spots, dial, self.digi_config.wspr_tx_percent);
                     let _ = self.event_tx.send(RadioEvent::WsprSpots(spots));
                 }
+                // No reporting-network upload, unlike WSPR's: there is no
+                // PI4 equivalent of WSPRnet to report to, so this only ever
+                // reaches the UI.
+                DigiAction::Pi4Spots(spots) => {
+                    let _ = self.event_tx.send(RadioEvent::Pi4Spots(spots));
+                }
                 DigiAction::SetDial(hz) => self.wspr_hop(hz),
                 DigiAction::Heard { call, grid, audio_hz, snr_db, slot_utc } => {
                     self.psk_report_heard(&call, &grid, audio_hz, snr_db, slot_utc, dial);
@@ -6720,6 +6726,11 @@ impl Engine {
             // would be quieter still: WSPR is 4-FSK in the same passband, so an
             // FT8 decoder handed its audio finds nothing and says nothing.
             Box::new(WsprController::new(self.digi_config.clone(), tap_rate))
+        } else if mode.is_pi4() {
+            // Ahead of the fall-through for the same reason `is_wspr` is:
+            // PI4 is 4-FSK too, just wider and faster, so an FT8 decoder
+            // handed its audio would sit there finding nothing.
+            Box::new(Pi4Controller::new(self.digi_config.clone(), tap_rate))
         } else {
             Box::new(DigiController::new(mode, self.digi_config.clone(), tap_rate))
         }
@@ -17126,6 +17137,7 @@ fn rig_mode_class(m: Mode) -> u8 {
         | Mode::Ft2
         | Mode::Js8
         | Mode::Wspr
+        | Mode::Pi4
         | Mode::Psk
         | Mode::Rtty
         | Mode::Sstv

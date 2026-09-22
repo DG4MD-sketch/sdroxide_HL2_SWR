@@ -14,6 +14,7 @@
 //! - [`js8`], [`fsq`] — the two keyboard modes with their own message model
 //! - [`sstv`], [`wefax`], [`rf_paint`] — the image modes
 //! - [`wspr`] — the propagation beacon: receptions and the beacon's own cycle
+//! - [`pi4`] — the PI4 propagation beacon: receptions and the one-minute cycle
 //! - [`rade`] — FreeDV / RADE digital voice
 //! - [`setup`] — the digimode setup window the panels share
 //! - [`widgets`] — the row and station-card widgets several panels draw
@@ -29,6 +30,7 @@ pub(in crate::app) mod fsq;
 pub(in crate::app) mod js8;
 mod navtex;
 pub(in crate::app) mod packet;
+pub(in crate::app) mod pi4;
 pub(in crate::app) mod rade;
 pub(in crate::app) mod rf_paint;
 pub(in crate::app) mod setup;
@@ -64,6 +66,9 @@ pub(in crate::app) fn panel_panes(mode: Mode) -> &'static [&'static str] {
         // is its own pane rather than sharing one, so a narrow screen can show
         // it whole instead of squeezing it under something else.
         Mode::Wspr => &["SPOTS", "MAP", "STATUS"],
+        // No MAP pane, unlike WSPR's: a PI4 message carries no grid square,
+        // so there is no path to place on a map.
+        Mode::Pi4 => &["SPOTS", "STATUS"],
         Mode::Fsq => &["HEARD", "TRAFFIC"],
         Mode::Sstv | Mode::SstvFm | Mode::Rifp => &["RECEIVE", "SEND"],
         // MONITOR is every frame heard on the channel, TERMINAL is the
@@ -516,6 +521,8 @@ impl SdroxideApp {
         // the panel prints the band from it, so a hopping beacon's multi-band
         // list is right as it stands.
         self.wspr_spots.clear();
+        // Same reasoning as the WSPR list just above.
+        self.pi4_spots.clear();
         // The read-along stream anchors on the buffer it was last reading; a
         // new mode fills that buffer with something unrelated, and without a
         // re-anchor the first snapshot after the change would be read out from

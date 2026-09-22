@@ -1079,6 +1079,10 @@ fn handle_event(shared: &Shared, ev: RadioEvent) {
             }
             RadioEvent::Ft8QsoLogged(r) => Some(ServerMsg::Ft8QsoLogged(r)),
             RadioEvent::WsprSpots(s) => Some(ServerMsg::WsprSpots(s)),
+            // No propagation-map observation, unlike WSPR's: a PI4 message
+            // carries no grid square, so there is nowhere on the map to
+            // place a reception.
+            RadioEvent::Pi4Spots(s) => Some(ServerMsg::Pi4Spots(s)),
             RadioEvent::Rds(d) => {
                 // Cached without the group log: that part is a delta, and
                 // replaying one batch of it to a client that joined later would

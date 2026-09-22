@@ -737,6 +737,8 @@ impl eframe::App for SdroxideApp {
                                     self.js8_panel(ui, &mut cmds, panel_h);
                                 } else if mode.is_wspr() {
                                     self.wspr_panel(ui, &mut cmds, panel_h);
+                                } else if mode.is_pi4() {
+                                    self.pi4_panel(ui, &mut cmds, panel_h);
                                 } else {
                                     self.digi_panel(ui, &mut cmds);
                                 }
@@ -1319,6 +1321,16 @@ impl SdroxideApp {
                         self.wspr_spots.insert(0, spot);
                     }
                     self.wspr_spots.truncate(crate::app::panels::wspr::WSPR_SPOT_ROWS);
+                }
+                RadioEvent::Pi4Spots(s) => {
+                    // Newest first. No de-duplication set, unlike WSPR's:
+                    // there is no PI4 equivalent of a WSPRnet download to
+                    // double-report the same reception, and the engine only
+                    // ever reports one slot's decode once.
+                    for spot in s.into_iter().rev() {
+                        self.pi4_spots.insert(0, spot);
+                    }
+                    self.pi4_spots.truncate(crate::app::panels::pi4::PI4_SPOT_ROWS);
                 }
                 RadioEvent::Ft8Status(s) => {
                     // Seed the editable config from the engine's persisted

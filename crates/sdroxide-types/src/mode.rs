@@ -283,6 +283,19 @@ pub enum Mode {
     /// frequency control chooses it; the dial follows but does not decide.
     /// Appended for the same reason as [`Mode::Hell`].
     Hfdl,
+    /// PI4 — the "Next Generation Beacon" propagation-beacon mode: 4-FSK at
+    /// 6 baud, 146 symbols filling 24.333 s, rate-1/2 K=32 convolutionally
+    /// coded (the same code WSPR and JT9 use), carrying up to eight
+    /// characters — ordinarily a beacon's callsign.
+    ///
+    /// Slotted like WSPR but on a one-minute cycle rather than a two-minute
+    /// one, and for the same reason WSPR is deliberately not [`Self::is_slotted`]:
+    /// what it produces is [`crate::Pi4Spot`]s rather than
+    /// [`crate::Decode`]s. Unlike WSPR it is receive-only here — a decoder for
+    /// a beacon network's signal, not a beacon implementation — so it carries
+    /// none of WSPR's duty-cycle or band-hopping machinery. Appended for the
+    /// same reason as [`Mode::Hell`].
+    Pi4,
 }
 
 /// The bands on which a mode that keeps phone practice rides the lower
@@ -303,7 +316,7 @@ const PHONE_LSB_BANDS: [(f64, f64); 3] =
 impl Mode {
     /// Every mode, in the order they cycle and appear in the picker — which is
     /// deliberately *not* the enum's declaration order (see [`Mode::Hell`]).
-    pub const ALL: [Mode; 42] = [
+    pub const ALL: [Mode; 43] = [
         Mode::Lsb,
         Mode::Usb,
         Mode::Cw,
@@ -326,6 +339,7 @@ impl Mode {
         Mode::Ft2,
         Mode::Js8,
         Mode::Wspr,
+        Mode::Pi4,
         Mode::Psk,
         Mode::Rtty,
         Mode::RttyFm,
@@ -353,12 +367,13 @@ impl Mode {
     /// packet, RF Paint). All are USB underneath except RIFP, VHF packet and
     /// VHF SSTV, which frequency-modulate the carrier, and ACARS, which is
     /// received in AM.
-    pub const DIGITAL: [Mode; 24] = [
+    pub const DIGITAL: [Mode; 25] = [
         Mode::Ft8,
         Mode::Ft4,
         Mode::Ft2,
         Mode::Js8,
         Mode::Wspr,
+        Mode::Pi4,
         Mode::Psk,
         Mode::Rtty,
         Mode::RttyFm,
@@ -390,6 +405,7 @@ impl Mode {
                 | Mode::Ft2
                 | Mode::Js8
                 | Mode::Wspr
+                | Mode::Pi4
                 | Mode::Psk
                 | Mode::Rtty
                 | Mode::RttyFm
@@ -616,6 +632,14 @@ impl Mode {
         matches!(self, Mode::Wspr)
     }
 
+    /// True for PI4. Its own controller and panel, for the same reason
+    /// [`Self::is_wspr`] has one: it is slotted, but there is no QSO to
+    /// sequence and what it decodes is a list of beacon receptions rather
+    /// than a conversation.
+    pub fn is_pi4(self) -> bool {
+        matches!(self, Mode::Pi4)
+    }
+
     /// The clock this mode keeps, for the modes that keep one by themselves.
     ///
     /// `None` for JS8 — its slot length is an operator setting, so the answer
@@ -640,6 +664,18 @@ impl Mode {
                 slot_s: crate::WSPR_SLOT_S,
                 tx_offset_s: crate::WSPR_TX_OFFSET_S,
                 burst_s: crate::WSPR_BURST_S,
+            }),
+            // A one-minute IARU mixed-mode beacon cycle: the PI4 message
+            // starts on the minute and runs 146 symbols of 166.667 ms —
+            // 24.333 s, `crate::PI4_BURST_S` — before the CW identification
+            // and carrier that follow it (and that this decoder does not
+            // read). `tx_offset_s` is 0 in the sense that the message starts
+            // right on the boundary; this mode never transmits, so nothing
+            // downstream of the slot clock reads it as a burst start.
+            Mode::Pi4 => Some(SlotTiming {
+                slot_s: crate::PI4_SLOT_S,
+                tx_offset_s: 0.0,
+                burst_s: crate::PI4_BURST_S,
             }),
             _ => None,
         }
@@ -704,6 +740,9 @@ impl Mode {
                 | Mode::Isb
                 | Mode::Ais
                 | Mode::HdRadio
+                // A decoder for a beacon network's signal, not a beacon
+                // implementation — see `Mode::Pi4`'s own doc comment.
+                | Mode::Pi4
         )
     }
 
@@ -772,6 +811,7 @@ impl Mode {
             Mode::Wefax => "WEFAX",
             Mode::Js8 => "JS8",
             Mode::Wspr => "WSPR",
+            Mode::Pi4 => "PI4",
             Mode::Drm => "DRM",
             Mode::HdRadio => "HD RADIO",
             Mode::Adsb => "ADS-B",
@@ -825,6 +865,7 @@ impl Mode {
                 | Mode::Ft2
                 | Mode::Js8
                 | Mode::Wspr
+                | Mode::Pi4
                 | Mode::Psk
                 | Mode::Rtty
                 | Mode::Olivia
@@ -935,6 +976,16 @@ impl Mode {
             // this mode operates in. 1200–1800 leaves room for a dial a few
             // hundred hertz out without letting the neighbours in.
             Mode::Wspr => (1200.0, 1800.0),
+            // The beacon network's own listening convention: dial tuned so
+            // the CW identification and carrier sit at 800 Hz audio, putting
+            // the standard (1 kHz-spaced, "K=40") variant's four PI4 tones
+            // between about 683 and 1386 Hz. Wide enough to show the CW and
+            // the carrier alongside them, since all three are what one beacon
+            // cycle actually is. The wider variants (PI4-80/96/120, for 2 and
+            // 3 kHz beacon spacing) put their top tone above this — an
+            // operator listening to one of those widens the passband, the
+            // same way a CW operator widens theirs for a fast fist.
+            Mode::Pi4 => (300.0, 1600.0),
             // RIFP is not a sideband mode: the CPFSK carrier sits *on* the
             // dial and swings ±4 kHz, so the passband straddles it. 25 kHz is
             // the profile's recommended occupied bandwidth.
@@ -1128,6 +1179,7 @@ impl Mode {
             | Mode::Ft2
             | Mode::Js8
             | Mode::Wspr
+            | Mode::Pi4
             | Mode::Psk
             | Mode::Rtty
             | Mode::RttyFm
@@ -1363,6 +1415,7 @@ impl Mode {
             | Mode::Ft2
             | Mode::Js8
             | Mode::Wspr
+            | Mode::Pi4
             | Mode::Psk
             | Mode::Rtty
             | Mode::Sstv
@@ -1961,7 +2014,7 @@ mod tests {
         // dropped and nothing listed twice.
         // The last variant *by discriminant*, which is the one appended most
         // recently — not the one that reads last in the picker.
-        let last = Mode::Hfdl as u8;
+        let last = Mode::Pi4 as u8;
         for i in 0..=last {
             let present = Mode::ALL.iter().filter(|m| **m as u8 == i).count();
             assert_eq!(present, 1, "discriminant {i} appears {present} times in Mode::ALL");
@@ -2139,7 +2192,7 @@ mod tests {
     #[test]
     fn only_the_slotted_modes_have_a_slot_clock() {
         for mode in Mode::ALL {
-            let expected = matches!(mode, Mode::Ft8 | Mode::Ft4 | Mode::Ft2 | Mode::Wspr);
+            let expected = matches!(mode, Mode::Ft8 | Mode::Ft4 | Mode::Ft2 | Mode::Wspr | Mode::Pi4);
             assert_eq!(mode.slot_timing().is_some(), expected, "{mode:?}");
         }
         assert_eq!(Mode::Js8.slot_timing(), None);
