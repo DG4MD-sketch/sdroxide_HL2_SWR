@@ -6,14 +6,16 @@ on:
   # Manual runs build all artifacts (downloadable from the run page) without
   # creating a release — useful for testing the pipeline.
   workflow_dispatch:
-  # Nightly build, 03:00 UTC. Same deal as a manual run — `release` is gated on
+  # Nightly build, 03:17 UTC. Same deal as a manual run — `release` is gated on
   # a tag, so nothing is published — but it builds the four platforms listed in
   # `targets` rather than all fourteen, and the result is downloaded from the
   # run's Artifacts section. Note that GitHub runs a schedule on the default
   # branch only, and disables it after 60 days with no commits to the
-  # repository; a push re-enables it.
+  # repository; a push re-enables it. The odd minute is deliberate: GitHub
+  # delays scheduled runs at the top of the hour, when load peaks, and drops
+  # some outright, which is most likely what became of the first 03:00 nightly.
   schedule:
-    - cron: '0 3 * * *'
+    - cron: '17 3 * * *'
 
 permissions:
   contents: write
