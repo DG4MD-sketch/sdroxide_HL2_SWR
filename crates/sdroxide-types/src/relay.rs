@@ -571,6 +571,22 @@ impl RelayConfig {
                 c.index
             ));
         }
+        // The driver keeps one bit per contact number, so a band decoder
+        // sharing its number with the antenna relay or the amplifier line
+        // would put that contact under the band table: its receive word would
+        // key the amplifier while receiving, and the over would no longer
+        // close it.
+        if let Some(c) = self.active_channels().find(|c| {
+            c.role == RelayRole::BandDecoder
+                && self
+                    .active_channels()
+                    .any(|o| o.index == c.index && o.role != RelayRole::BandDecoder)
+        }) {
+            return Some(format!(
+                "T/R switch contact {} is a band decoder and has another job as well",
+                c.index
+            ));
+        }
         if self.link == RelayLink::Gpio {
             // Against the highest contact *number*, not the count: the GPIO
             // list is indexed by number, so a table using contacts 1 and 5
@@ -763,6 +779,26 @@ mod tests {
             ..band_decoder_cfg()
         };
         assert_eq!(lines.refusal(), None);
+    }
+
+    /// `band_mask` clips a row to the band-decoder contacts by number, so a
+    /// number that is also the amplifier's would let the row through to the
+    /// amplifier line — keyed on receive whenever the band's RX word has it.
+    #[test]
+    fn a_band_decoder_cannot_share_its_contact_with_another_job() {
+        let mut cfg = RelayConfig {
+            link: RelayLink::Serial,
+            serial: SerialConfig { path: "/dev/ttyUSB0".into(), ..SerialConfig::default() },
+            ..band_decoder_cfg()
+        };
+        assert_eq!(cfg.refusal(), None);
+        // The amplifier renumbered onto the first filter's contact.
+        cfg.channels[2].index = 1;
+        let why = cfg.refusal();
+        assert!(
+            why.as_deref().is_some_and(|w| w.contains("contact 1")),
+            "a shared contact was accepted: {why:?}"
+        );
     }
 
     #[test]
