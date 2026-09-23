@@ -141,6 +141,7 @@ pub fn to_hamlib_mode(m: Mode) -> &'static str {
         | Mode::Js8
         | Mode::Wspr
         | Mode::Pi4
+        | Mode::Fst4
         | Mode::Ft4
         | Mode::Ft2
         | Mode::Psk

@@ -24,6 +24,7 @@ mod digi;
 mod drm;
 mod entity;
 mod entity_flags;
+mod fst4;
 mod geo;
 mod hd;
 mod hfdl;
@@ -137,6 +138,7 @@ pub use drm::{
 pub use entity::{
     EntityInfo, EntityPlace, all_entities, resolve_callsign, resolve_place, resolve_prefix,
 };
+pub use fst4::Fst4Period;
 pub use geo::{
     bearing_deg, distance_km, great_circle_points, grid_bearing, grid_distance_km, grid_to_latlon,
     latlon_to_grid,

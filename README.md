@@ -71,7 +71,9 @@ One binary, three ways to run it:
   **WSPR** (transmit and receive, with WSPRnet reporting and optional band
   hopping), receive-only **PI4** (the "Next Generation Beacon" propagation
   mode — 4-FSK, decoded from a rate-1/2 K=32 Fano search across every beacon
-  variant and tone frequency the network uses),
+  variant and tone frequency the network uses), receive-only **FST4** (the
+  slow weak-signal mode for EME, troposcatter and LF/MF — 160-symbol GFSK in a
+  15/30/60/120/300-second T/R period, the same 77-bit message as FT8),
   **Hellschreiber** (all seven Feld Hell / FSK Hell variants, on a scrolling
   raster), image **SSTV** (Scottie, Martin, Robot), image **RIFP**
   (draft-dulaunoy-rifp-00 — packetised, checksummed pictures over a 4800-baud
@@ -220,6 +222,24 @@ Beacon" network, not a beacon implementation.
 - Tune so the beacon's CW identification and carrier sit at 800 Hz audio —
   the network's own convention — and the four PI4 tones land where the
   decoder searches for them by default.
+
+## FST4
+
+Selecting **FST4** opens the decode list with a period chip row above it:
+choose the **T/R period** — 15, 30, 60, 120 or 300 seconds — and the slot
+length and the decode both follow. FST4 is the slow weak-signal mode of the
+same WSJT family, built for the paths where JT65 and FT8 run out: EME
+(moonbounce), troposcatter, and LF/MF propagation experiments. It is receive
+only here.
+
+- The period is the whole trade: a short one is a fast terrestrial signal, a
+  long one digs tens of dB under the noise for a moonbounce path. **60
+  seconds is the band convention** and the default. Both ends of a contact
+  have to agree on it.
+- A decode is the same `<to> <from> <grid|report>` as FT8/FT4, since FST4
+  carries the same 77-bit message.
+- On the longer periods expect the list to fill in well after the period
+  ends: an FST4-300 scan is tens of seconds of work over a five-minute slot.
 
 ## Propagation heat map
 

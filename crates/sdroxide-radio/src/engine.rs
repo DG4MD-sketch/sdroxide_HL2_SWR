@@ -18,9 +18,9 @@ use sdroxide_ais::{AisAction, AisController};
 use sdroxide_config::BandStacks;
 use sdroxide_digi::{
     AcarsController, AprsController, AtChatController, CwController, DigiAction, DigiController,
-    DigiEngine, FsqController, HellController, Js8Controller, NavtexController, PacketController,
-    Pi4Controller, RadeController, RfPaintController, RifpController, SstvController,
-    TextModemController, WefaxController, WsprController,
+    DigiEngine, FsqController, Fst4Controller, HellController, Js8Controller, NavtexController,
+    PacketController, Pi4Controller, RadeController, RfPaintController, RifpController,
+    SstvController, TextModemController, WefaxController, WsprController,
 };
 use sdroxide_drm::DrmDemod;
 use sdroxide_dsp::{
@@ -6753,6 +6753,11 @@ impl Engine {
             // PI4 is 4-FSK too, just wider and faster, so an FT8 decoder
             // handed its audio would sit there finding nothing.
             Box::new(Pi4Controller::new(self.digi_config.clone(), tap_rate))
+        } else if mode == Mode::Fst4 {
+            // The same shape again, and ahead of the fall-through for the same
+            // reason: FST4 is its own slow protocol whose period is a setting,
+            // which the FT8 controller has no concept of.
+            Box::new(Fst4Controller::new(self.digi_config.clone(), tap_rate))
         } else {
             Box::new(DigiController::new(mode, self.digi_config.clone(), tap_rate))
         }
@@ -17282,6 +17287,7 @@ fn rig_mode_class(m: Mode) -> u8 {
         | Mode::Js8
         | Mode::Wspr
         | Mode::Pi4
+        | Mode::Fst4
         | Mode::Psk
         | Mode::Rtty
         | Mode::Sstv

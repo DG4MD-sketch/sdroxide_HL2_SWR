@@ -18,11 +18,12 @@ or connects to a remote sdroxide server.
 2. [Basic operation](#2-basic-operation)
     - [2.20 HD Radio (NRSC-5)](#220-hd-radio-nrsc-5)
     - [2.22 QO-100 beacon plugin](#222-qo-100-beacon-plugin)
-3. [Digital modes (FT8, FT4, FT2, PSK31, RTTY, Olivia, THOR, FSQ, Hellschreiber, SSTV, RIFP, weather fax, JS8, RF Paint, WSPR, PI4, packet, APRS, ADS-B, NAVTEX, ACARS, VDL2, AIS, HFDL, AtCHAT NET)](#3-digital-modes)
+3. [Digital modes (FT8, FT4, FT2, FST4, PSK31, RTTY, Olivia, THOR, FSQ, Hellschreiber, SSTV, RIFP, weather fax, JS8, RF Paint, WSPR, PI4, packet, APRS, ADS-B, NAVTEX, ACARS, VDL2, AIS, HFDL, AtCHAT NET)](#3-digital-modes)
     - [3.17 AtCHAT NET](#317-atchat-net)
     - [3.18 ACARS](#318-acars-airline-datalink-on-airband)
     - [3.19 HFDL](#319-hfdl-aircraft-on-shortwave)
     - [3.20 PI4](#320-pi4-next-generation-beacon)
+    - [3.21 FST4](#321-fst4)
 4. [Skimmers (CW, PSK, RTTY)](#4-skimmers)
 5. [ISM band decoder (315 / 345 / 433 / 868 / 915 MHz devices)](#5-ism-band-decoder)
 6. [Settings](#6-settings)
@@ -321,7 +322,7 @@ popup with three rows:
   has a standard calling frequency carry a cyan underline; see
   [§3.1](#31-general-considerations).
 - **MODE:** `LSB USB CW AM SAM NFM WFM DRM HD DIGU DIGL DSB ISB SPEC`.
-- **DIGITAL:** `FT8 FT4 PSK RTTY RTTY-FM OLIVIA THOR FSQ HELL SSTV SSTV-FM NAVTEX RIFP RFPAINT RADE` (see
+- **DIGITAL:** `FT8 FT4 FST4 PSK RTTY RTTY-FM OLIVIA THOR FSQ HELL SSTV SSTV-FM NAVTEX RIFP RFPAINT RADE` (see
   [Digital modes](#3-digital-modes)).
 
 ![The band and mode selector popup](images/04-band-mode-popup.jpg)
@@ -5803,6 +5804,42 @@ Generation Beacon" transmission — there are beacons on 6 m through 23 cm and
 higher. Receive only: there is no transmit half of this panel, and there
 never will be — this decoder exists to listen to the network, not to join
 it.
+
+### 3.21 FST4
+
+**FST4** is the slow weak-signal mode of the same WSJT family, built for the
+paths where JT65 and FT8 run out: EME (moonbounce), troposcatter, and LF/MF
+propagation experiments. It is even slower than JT65 and digs
+correspondingly deeper.
+
+#### The period is the setting
+
+FST4 runs on a T/R period of **15, 30, 60, 120 or 300 seconds**, chosen by
+the chip row at the top of the panel. The period is the whole trade: a short
+one is a fast terrestrial signal, a long one is tens of dB under the noise
+for a moonbounce path that takes a quarter of an hour to exchange a callsign.
+**60 seconds is the band convention** and the default. Both ends of a contact
+have to agree on it, so check what the other station is running before
+choosing.
+
+#### What you see
+
+The same **DECODES** list as FT8 and FT4 — time, SNR, audio offset, and the
+decoded `<to> <from> <grid|report>`. FST4 carries the same 77-bit message as
+FT8, so a decode reads the same way.
+
+#### One slot at a time, and a long one
+
+The decoder holds the whole slot and decodes it on a worker thread — an
+FST4-300 scan is tens of seconds of work over a five-minute slot — so on the
+longer periods expect the list to fill in well after the period ends, and a
+slot to be skipped rather than queued if the machine cannot keep up.
+
+#### What you need
+
+Nothing beyond an SSB receiver on the band. Receive only: transmit is not
+wired in this build, as for JT65/JT9 — an FST4 contact is a precisely-timed,
+minutes-long handshake and the panel decodes rather than sequences.
 
 ## 4. Skimmers
 

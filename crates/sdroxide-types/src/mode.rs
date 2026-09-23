@@ -296,6 +296,16 @@ pub enum Mode {
     /// none of WSPR's duty-cycle or band-hopping machinery. Appended for the
     /// same reason as [`Mode::Hell`].
     Pi4,
+    /// FST4 — the slow weak-signal mode for EME, troposcatter and LF/MF
+    /// propagation: 160-symbol GFSK, LDPC(240,101), the same 77-bit message as
+    /// FT8/FT4, in a T/R period of 15, 30, 60, 120 or 300 seconds.
+    ///
+    /// The period is an operator setting ([`crate::Fst4Period`]), not part of
+    /// the mode — exactly as JS8's speed is a [`crate::Js8Speed`] — so
+    /// [`Mode::slot_timing`] answers `None` for it and the clock comes from
+    /// the chosen period. Receive only in this build, as [`Mode::Pi4`] is.
+    /// Appended for the same reason as [`Mode::Hell`].
+    Fst4,
 }
 
 /// The bands on which a mode that keeps phone practice rides the lower
@@ -316,7 +326,7 @@ const PHONE_LSB_BANDS: [(f64, f64); 3] =
 impl Mode {
     /// Every mode, in the order they cycle and appear in the picker — which is
     /// deliberately *not* the enum's declaration order (see [`Mode::Hell`]).
-    pub const ALL: [Mode; 43] = [
+    pub const ALL: [Mode; 44] = [
         Mode::Lsb,
         Mode::Usb,
         Mode::Cw,
@@ -360,6 +370,7 @@ impl Mode {
         Mode::RfPaint,
         Mode::Rade,
         Mode::Hfdl,
+        Mode::Fst4,
     ];
 
     /// The digital modes handled by a dedicated decode/encode engine (the
@@ -367,7 +378,7 @@ impl Mode {
     /// packet, RF Paint). All are USB underneath except RIFP, VHF packet and
     /// VHF SSTV, which frequency-modulate the carrier, and ACARS, which is
     /// received in AM.
-    pub const DIGITAL: [Mode; 25] = [
+    pub const DIGITAL: [Mode; 26] = [
         Mode::Ft8,
         Mode::Ft4,
         Mode::Ft2,
@@ -393,6 +404,7 @@ impl Mode {
         Mode::Packet,
         Mode::PacketHf,
         Mode::Aprs,
+        Mode::Fst4,
     ];
 
     /// True for modes that use a dedicated decode/QSO layer over USB.
@@ -424,6 +436,7 @@ impl Mode {
                 | Mode::Packet
                 | Mode::PacketHf
                 | Mode::Aprs
+                | Mode::Fst4
         )
     }
 
@@ -595,7 +608,7 @@ impl Mode {
     /// Including it would buy an overlay that is always empty and a transmit
     /// frequency picker for a mode whose tone offset does not move.
     pub fn is_slotted(self) -> bool {
-        matches!(self, Mode::Ft8 | Mode::Ft4 | Mode::Ft2 | Mode::Js8)
+        matches!(self, Mode::Ft8 | Mode::Ft4 | Mode::Ft2 | Mode::Js8 | Mode::Fst4)
     }
 
     /// How much spectrum this mode's signal occupies, in Hz, for the modes whose
@@ -743,6 +756,9 @@ impl Mode {
                 // A decoder for a beacon network's signal, not a beacon
                 // implementation — see `Mode::Pi4`'s own doc comment.
                 | Mode::Pi4
+                // FST4 is a QSO mode, but transmit is not wired in this
+                // build — the panel is the decode list alone.
+                | Mode::Fst4
         )
     }
 
@@ -820,6 +836,7 @@ impl Mode {
             Mode::Ais => "AIS",
             Mode::Hfdl => "HFDL",
             Mode::AtChat => "ATCHAT",
+            Mode::Fst4 => "FST4",
         }
     }
 
@@ -877,6 +894,7 @@ impl Mode {
                 | Mode::PacketHf
                 | Mode::Navtex
                 | Mode::Wefax
+                | Mode::Fst4
         );
         crate::ModeProfile {
             agc: Some(if weak_digi { AgcMode::Slow } else { AgcMode::Med }),
@@ -949,6 +967,7 @@ impl Mode {
             | Mode::Ft4
             | Mode::Ft2
             | Mode::Js8
+            | Mode::Fst4
             | Mode::Psk
             | Mode::Rtty
             | Mode::Sstv
@@ -1196,7 +1215,8 @@ impl Mode {
             | Mode::Rade
             | Mode::Packet
             | Mode::PacketHf
-            | Mode::Aprs => C::Data,
+            | Mode::Aprs
+            | Mode::Fst4 => C::Data,
         }
     }
 
@@ -1430,7 +1450,8 @@ impl Mode {
             | Mode::Acars
             | Mode::PacketHf
             | Mode::Rade
-            | Mode::HdRadio => &[],
+            | Mode::HdRadio
+            | Mode::Fst4 => &[],
         }
     }
 }
@@ -1968,6 +1989,8 @@ mod tests {
             (Mode::HdRadio, 39),
             (Mode::Acars, 40),
             (Mode::Hfdl, 41),
+            (Mode::Pi4, 42),
+            (Mode::Fst4, 43),
         ];
         for (mode, index) in pinned {
             assert_eq!(mode as u8, index, "{} moved", mode.label());
@@ -2014,7 +2037,7 @@ mod tests {
         // dropped and nothing listed twice.
         // The last variant *by discriminant*, which is the one appended most
         // recently — not the one that reads last in the picker.
-        let last = Mode::Pi4 as u8;
+        let last = Mode::Fst4 as u8;
         for i in 0..=last {
             let present = Mode::ALL.iter().filter(|m| **m as u8 == i).count();
             assert_eq!(present, 1, "discriminant {i} appears {present} times in Mode::ALL");

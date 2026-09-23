@@ -1452,7 +1452,14 @@ use sdroxide_types::{
 /// `band_table: Vec<RelayBandRow>` on its tail, and `RelayConfig` rides
 /// whole inside `Command::SetRelayConfig`, so a v164 peer reads the extra
 /// bytes as the start of the next field and fails to decode the command.
-pub const PROTO_VERSION: u16 = 165;
+///
+/// v166: FST4, the slow weak-signal mode. `Mode::Fst4` is appended to that
+/// enum and `DigiConfig` gains `fst4_period` (`Fst4Period`) on its tail, since
+/// the period is a setting rather than part of the mode. `DigiConfig` rides
+/// `Command::SetDigiConfig` and `DigiStatus` whole, so a v165 peer reads the
+/// extra bytes as the start of the next field and fails to decode every
+/// digital status — the same break as v162's appended CW settings.
+pub const PROTO_VERSION: u16 = 166;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]
