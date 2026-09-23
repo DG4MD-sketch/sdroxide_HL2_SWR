@@ -12273,7 +12273,7 @@ impl Engine {
     /// had already been served.
     fn tell_tr_switch_bands(&mut self) {
         let Some(hub) = self.tr_switch.as_ref() else { return };
-        let (rx_hz, tx_hz) = (self.state.rx_freq_hz(), self.state.tx_freq_hz());
+        let (rx_hz, tx_hz) = (self.state.rx_freq_hz(), self.tx_target_hz());
         let told = self.relay_bands_told;
         if matches!(told, Some((r, t, _, _)) if r == rx_hz && t == tx_hz) {
             return;
@@ -15190,6 +15190,18 @@ impl Engine {
         self.sync_skim_window();
     }
 
+    /// Where a key-down would transmit: the dial's transmit frequency, or
+    /// under a satellite lock the transponder's uplink for the dial — the
+    /// mapping the key-down itself uses. Everything that switches hardware by
+    /// band ahead of the over reads this, so a V/U or QO-100 station has its
+    /// filters on the uplink's band rather than the downlink's.
+    fn tx_target_hz(&self) -> f64 {
+        match self.sat_lock.as_ref().and_then(|l| l.cfg.uplink) {
+            Some(u) => u.uplink_for(self.state.active_freq_hz()) + self.state.xit.effective_hz(),
+            None => self.state.tx_freq_hz(),
+        }
+    }
+
     /// Tell the source where we would transmit, for the band-switching hardware
     /// that has to know before the operator keys (see
     /// [`IqSource::set_tx_freq_hz`]).
@@ -15201,10 +15213,7 @@ impl Engine {
     /// instrumenting them all is a list that would silently fall out of date.
     /// Deriving it costs one comparison per iteration.
     fn push_tx_freq(&mut self) {
-        let hz = match self.sat_lock.as_ref().and_then(|l| l.cfg.uplink) {
-            Some(u) => u.uplink_for(self.state.active_freq_hz()) + self.state.xit.effective_hz(),
-            None => self.state.tx_freq_hz(),
-        };
+        let hz = self.tx_target_hz();
         if self.tx_freq_told != Some(hz) {
             self.tx_freq_told = Some(hz);
             self.source.set_tx_freq_hz(hz);
