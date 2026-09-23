@@ -27,6 +27,7 @@ mod entity_flags;
 mod geo;
 mod hd;
 mod hfdl;
+mod ibp;
 mod input;
 mod ism;
 mod js8;
@@ -145,6 +146,11 @@ pub use hd::{HdAudioService, HdRadioStatus};
 pub use hfdl::{
     HFDL_DEFAULT_HZ, HFDL_LANE_RATE_HZ, HFDL_LOG_DEPTH, HfdlDecode, HfdlFix, HfdlSettings,
     HfdlStatus,
+};
+pub use ibp::{
+    Active as IbpActive, BANDS as IBP_BANDS, BEACONS as IBP_BEACONS, Beacon as IbpBeacon,
+    CYCLE_SECONDS as IBP_CYCLE_SECONDS, IbpBand, SLOT_SECONDS as IBP_SLOT_SECONDS,
+    active_at as ibp_active_at, seconds_left_in_slot as ibp_seconds_left, slot_at as ibp_slot_at,
 };
 pub use input::{
     Action, ActionInput, ActionKind, BindingTuning, ButtonMode, InputSettings, KeyBinding,
