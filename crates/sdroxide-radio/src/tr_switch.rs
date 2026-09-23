@@ -100,19 +100,21 @@ impl TrSwitch {
         // A new driver starts knowing no band. Only ever installed off the
         // air (see `Engine::sync_relay`), so the TX band to hand it is the
         // one a sensed over would transmit on.
-        let (rx, tx) = {
-            let b = self.bands.lock().unwrap_or_else(|e| e.into_inner());
-            (b.rx, b.tx.get(&cfg.sense.radio).copied())
-        };
-        if let Some(h) = handle.as_ref() {
-            if let Some(rx) = rx {
-                h.set_rx_band(rx);
-            }
-            if let Some(tx) = tx {
-                h.set_tx_band(tx);
-            }
-        }
+        //
+        // `bands` is held across the swap, taken before `driver` as `key`
+        // takes them: a band another engine reports meanwhile then reaches
+        // the new driver after this replay, rather than the old one on its
+        // way out.
         let old = {
+            let b = self.bands.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(h) = handle.as_ref() {
+                if let Some(rx) = b.rx {
+                    h.set_rx_band(rx);
+                }
+                if let Some(tx) = b.tx.get(&cfg.sense.radio).copied() {
+                    h.set_tx_band(tx);
+                }
+            }
             let mut slot = self.driver.lock().unwrap_or_else(|e| e.into_inner());
             std::mem::replace(&mut *slot, handle)
         };
