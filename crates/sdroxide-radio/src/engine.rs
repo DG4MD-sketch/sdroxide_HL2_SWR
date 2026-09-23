@@ -12321,6 +12321,10 @@ impl Engine {
         self.follow_rig_tx(on);
         // Straight through to the switch rather than waiting for the next tick.
         // The whole value of hearing about this early is spending none of it.
+        // The bands first, as `poll_tr_switch` does: a rig that retuned and
+        // keyed in the same batch of updates would otherwise bring the old
+        // band into the over, and a band arriving mid-over waits for its end.
+        self.tell_tr_switch_bands();
         if let Some(hub) = self.tr_switch.as_ref() {
             hub.publish(self.instance, self.on_air());
         }
