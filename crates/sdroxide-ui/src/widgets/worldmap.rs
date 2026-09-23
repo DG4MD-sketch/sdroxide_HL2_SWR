@@ -500,6 +500,44 @@ fn draw_cities(
     }
 }
 
+/// Stamp an equirectangular world texture across the view, repeated sideways so
+/// a view that straddles the antimeridian is still covered. The painter's clip
+/// rectangle trims what falls outside.
+///
+/// The projection is linear in latitude and longitude, so the whole world is an
+/// axis-aligned rectangle here and the texture's own bilinear filtering is what
+/// turns its cells into soft shapes with no visible edges.
+fn paint_world_texture(
+    p: &eframe::egui::Painter,
+    rect: eframe::egui::Rect,
+    clat: f64,
+    clon: f64,
+    lon_span: f64,
+    lat_span: f64,
+    tex: eframe::egui::TextureId,
+) {
+    let lon_to_x = |lon: f64| rect.left() + (0.5 + ((lon - clon) / lon_span) as f32) * rect.width();
+    let lat_to_y = |lat: f64| rect.top() + (0.5 - ((lat - clat) / lat_span) as f32) * rect.height();
+    let world = eframe::egui::Rect::from_min_max(
+        pos2(lon_to_x(-180.0), lat_to_y(90.0)),
+        pos2(lon_to_x(180.0), lat_to_y(-90.0)),
+    );
+    let world_w = world.width();
+    if world_w <= 1.0 {
+        return;
+    }
+    // Which copies of the world overlap what is on screen.
+    let first = ((rect.left() - world.right()) / world_w).floor() as i32;
+    let last = ((rect.right() - world.left()) / world_w).ceil() as i32;
+    let uv = eframe::egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+    for k in first..=last {
+        let r = world.translate(vec2(k as f32 * world_w, 0.0));
+        if r.intersects(rect) {
+            p.image(tex, r, uv, Color32::WHITE);
+        }
+    }
+}
+
 /// Draw the map filling the available width (2:1 aspect). `view` carries the
 /// animated centre/zoom across frames. `home`/`dx`/`preview` are (lat, lon) in
 /// degrees. `stations` is every decoded station still on the map — drawn as
@@ -529,6 +567,11 @@ pub fn show(
     // (see `crate::prop_map::PropHeat`). Painted under the continents, so the
     // coastline stays readable on top of it.
     heat: Option<eframe::egui::TextureId>,
+    // The grey line — night and twilight — as an equirectangular RGBA image of
+    // the whole world (see `crate::prop_map::NightShade`). Painted over the
+    // heat, so a band that is dead because the Sun is down reads that way, but
+    // under the continents, so the geography stays legible.
+    night: Option<eframe::egui::TextureId>,
     tx_active: bool,
     max_h: f32,
 ) {
@@ -597,27 +640,12 @@ pub fn show(
     // sideways to cover a view that straddles the antimeridian; the painter's
     // clip rectangle trims what falls outside.
     if let Some(tex) = heat {
-        let lon_to_x =
-            |lon: f64| rect.left() + (0.5 + ((lon - clon) / lon_span) as f32) * rect.width();
-        let lat_to_y =
-            |lat: f64| rect.top() + (0.5 - ((lat - clat) / lat_span) as f32) * rect.height();
-        let world = eframe::egui::Rect::from_min_max(
-            pos2(lon_to_x(-180.0), lat_to_y(90.0)),
-            pos2(lon_to_x(180.0), lat_to_y(-90.0)),
-        );
-        let world_w = world.width();
-        if world_w > 1.0 {
-            // Which copies of the world overlap what is on screen.
-            let first = ((rect.left() - world.right()) / world_w).floor() as i32;
-            let last = ((rect.right() - world.left()) / world_w).ceil() as i32;
-            let uv = eframe::egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
-            for k in first..=last {
-                let r = world.translate(vec2(k as f32 * world_w, 0.0));
-                if r.intersects(rect) {
-                    p.image(tex, r, uv, Color32::WHITE);
-                }
-            }
-        }
+        paint_world_texture(&p, rect, clat, clon, lon_span, lat_span, tex);
+    }
+    // The grey line, over the heat and under the continents: on the night side
+    // the map is visibly darker, so the terminator reads even under the heat.
+    if let Some(tex) = night {
+        paint_world_texture(&p, rect, clat, clon, lon_span, lat_span, tex);
     }
 
     let dot_r = draw_base(&p, rect, clat, clon, lon_span, lat_span, map);
