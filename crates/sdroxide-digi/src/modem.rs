@@ -346,6 +346,80 @@ impl Ft8Modem {
     }
 }
 
+/// Decode one full 60-second JT65 or JT9 slot of 12 kHz mono i16 audio.
+///
+/// The two JT modes share the 72-bit JT message and the 60-second slot, so
+/// they share this mapping; only the call into mfsk-core differs. It is a free
+/// function rather than a [`Ft8Modem`] method because JT keeps no hash table —
+/// its 72-bit message has no hashed-callsign layout — and the JT sound card is
+/// the i16 the slotted engine already carries, which mfsk-core wants as f32.
+///
+/// A JT decode carries **no CRC** (72 bits, no checksum), so a weak or empty
+/// slot can converge on a well-formed-looking message that was never sent. The
+/// decoder's own scan collapses duplicates and orders by sync score, and the
+/// first result is the real one when there is one; the caller keeps only the
+/// strongest few rather than trusting every row.
+pub fn decode_jt_slot(audio_12k: &[i16], mode: Mode, slot_utc: i64) -> Vec<Decode> {
+    let audio: Vec<f32> = audio_12k.iter().map(|&s| f32::from(s) / 28_000.0).collect();
+    match mode {
+        Mode::Jt65 => mfsk_core::jt65::decode_scan_default(&audio, DECODE_RATE_U32)
+            .into_iter()
+            .filter_map(|r| {
+                let dt = r.dt_sec;
+                jt_decode(r.message, r.snr_db, dt, r.freq_hz, slot_utc)
+            })
+            .collect(),
+        Mode::Jt9 => mfsk_core::jt9::decode_scan_default(&audio, DECODE_RATE_U32)
+            .into_iter()
+            .filter_map(|r| {
+                // JT9 exposes only the start index; the dt is relative to the
+                // slot start, which is where the scan was given the buffer.
+                let dt = r.start_sample as f32 / DECODE_RATE_U32 as f32;
+                jt_decode(r.message, r.snr_db, dt, r.freq_hz, slot_utc)
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// mfsk-core's JT entry points take a `u32` rate; the workspace's is `f64`.
+const DECODE_RATE_U32: u32 = 12_000;
+
+/// Map one mfsk-core JT message onto the stable [`Decode`].
+///
+/// The 72-bit message has two shapes: the everyday `<to> <from> <grid|report>`
+/// and an `Unsupported` catch-all for compound callsigns and free text, which
+/// this build does not unpack — it is skipped rather than shown as a row of
+/// hex, because a decode list a listener cannot read is worse than a shorter
+/// one.
+fn jt_decode(
+    message: mfsk_core::msg::Jt72Message,
+    snr_db: f32,
+    dt_sec: f32,
+    freq_hz: f32,
+    slot_utc: i64,
+) -> Option<Decode> {
+    let mfsk_core::msg::Jt72Message::Standard { call1, call2, grid_or_report } = message else {
+        return None;
+    };
+    let text = format!("{call1} {call2} {grid_or_report}");
+    let p = parse_message(&text, MsgKind::Standard);
+    Some(Decode {
+        slot_utc,
+        snr_db: snr_db.round() as i16,
+        dt: dt_sec,
+        audio_hz: freq_hz,
+        message: text,
+        to: p.to,
+        from: p.from,
+        grid: p.grid,
+        is_cq: p.is_cq,
+        cq_to: p.cq_to,
+        free_text: false,
+        rr73_to: None,
+    })
+}
+
 /// Pack `text` into a 77-bit message, degrading to the nearest layout FT8 can
 /// carry, and report the message as the far end will read it.
 ///
@@ -1060,6 +1134,37 @@ mod tests {
         slot.resize((slot_s * 12_000.0) as usize, 0.0);
         let i16buf: Vec<i16> = slot.iter().map(|&s| (s * 20_000.0) as i16).collect();
         (sent, modem.decode_slot(&i16buf, 0, &ApHints::default(), 1500.0))
+    }
+
+    /// A synthesized JT65 and JT9 message decodes back to the same
+    /// `<to> <from> <grid>` — the round trip the JT controller makes. Both
+    /// modes carry no CRC, so the scan may return extra rows on the noise
+    /// beside the signal; the real message has to be among them, and the
+    /// strongest one has to be it.
+    #[test]
+    fn jt_messages_round_trip() {
+        for mode in [Mode::Jt65, Mode::Jt9] {
+            let synth = match mode {
+                Mode::Jt65 => mfsk_core::jt65::tx::synthesize_standard(
+                    "CQ", "K1ABC", "FN42", 12_000, 1000.0, 0.3,
+                ),
+                _ => mfsk_core::jt9::tx::synthesize_standard(
+                    "CQ", "K1ABC", "FN42", 12_000, 1000.0, 0.3,
+                ),
+            }
+            .expect("synthesize");
+            // The scan wants a whole 60-second slot; pad the burst into one.
+            let mut slot = vec![0.0f32; 12_000]; // the one-second TX offset
+            slot.extend_from_slice(&synth);
+            slot.resize(60 * 12_000, 0.0);
+            let i16buf: Vec<i16> = slot.iter().map(|&s| (s * 20_000.0) as i16).collect();
+
+            let decodes = decode_jt_slot(&i16buf, mode, 0);
+            let best = decodes.first().unwrap_or_else(|| panic!("{mode:?}: nothing decoded"));
+            assert_eq!(best.from.as_deref(), Some("K1ABC"), "{mode:?}: {decodes:?}");
+            assert!(best.is_cq, "{mode:?}: {decodes:?}");
+            assert_eq!(best.grid.as_deref(), Some("FN42"), "{mode:?}: {decodes:?}");
+        }
     }
 
     #[test]

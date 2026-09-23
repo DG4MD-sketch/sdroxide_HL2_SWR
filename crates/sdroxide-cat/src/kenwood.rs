@@ -365,6 +365,8 @@ fn mode_digit(m: Mode) -> (char, bool) {
         | Mode::Js8
         | Mode::Wspr
         | Mode::Pi4
+        | Mode::Jt65
+        | Mode::Jt9
         | Mode::Ft4
         | Mode::Ft2
         | Mode::Psk

@@ -18,9 +18,9 @@ use sdroxide_ais::{AisAction, AisController};
 use sdroxide_config::BandStacks;
 use sdroxide_digi::{
     AcarsController, AprsController, AtChatController, CwController, DigiAction, DigiController,
-    DigiEngine, FsqController, HellController, Js8Controller, NavtexController, PacketController,
-    Pi4Controller, RadeController, RfPaintController, RifpController, SstvController,
-    TextModemController, WefaxController, WsprController,
+    DigiEngine, FsqController, HellController, Js8Controller, JtController, NavtexController,
+    PacketController, Pi4Controller, RadeController, RfPaintController, RifpController,
+    SstvController, TextModemController, WefaxController, WsprController,
 };
 use sdroxide_drm::DrmDemod;
 use sdroxide_dsp::{
@@ -6753,6 +6753,12 @@ impl Engine {
             // PI4 is 4-FSK too, just wider and faster, so an FT8 decoder
             // handed its audio would sit there finding nothing.
             Box::new(Pi4Controller::new(self.digi_config.clone(), tap_rate))
+        } else if matches!(mode, Mode::Jt65 | Mode::Jt9) {
+            // Ahead of the fall-through, which is FT8's: JT65/JT9 are a different
+            // 60-second protocol with no 77-bit message and no QSO sequencer, so
+            // an FT8 decoder handed their audio would decode nothing and say
+            // nothing. Their own controller holds the slot and shows decodes.
+            Box::new(JtController::new(mode, self.digi_config.clone(), tap_rate))
         } else {
             Box::new(DigiController::new(mode, self.digi_config.clone(), tap_rate))
         }
@@ -17282,6 +17288,8 @@ fn rig_mode_class(m: Mode) -> u8 {
         | Mode::Js8
         | Mode::Wspr
         | Mode::Pi4
+        | Mode::Jt65
+        | Mode::Jt9
         | Mode::Psk
         | Mode::Rtty
         | Mode::Sstv

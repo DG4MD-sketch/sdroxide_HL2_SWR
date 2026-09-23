@@ -99,6 +99,9 @@ pub(in crate::app) fn panel_panes(mode: Mode) -> &'static [&'static str] {
         Mode::Wefax => &["CHART", "SAVED"],
         Mode::Navtex => &["MESSAGES", "READING"],
         Mode::RfPaint => &["TEXT", "IMAGE"],
+        // The decode list alone: the QSO pane is FT8's sequencer, which a
+        // receive-only JT65/JT9 build has nothing to put in.
+        Mode::Jt65 | Mode::Jt9 => &["DECODES"],
         // The keyboard modes and RADE are one column already: receive above,
         // what you are sending below it.
         _ => &["PANEL"],
@@ -1064,6 +1067,20 @@ impl SdroxideApp {
                 String::new()
             }
         ));
+    }
+
+    /// The JT65/JT9 panel: the slot clock and the decode list, and nothing
+    /// else.
+    ///
+    /// A JT decode is an ordinary [`sdroxide_types::Decode`], so the list is
+    /// the one the FT8 modes share. What is missing is the QSO area — a JT
+    /// exchange is a minutes-long handshake this build does not sequence (it
+    /// is receive-only), so the sequencer, the transmit pane and the call
+    /// queue have nothing to drive.
+    pub(in crate::app) fn jt_panel(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<Command>) {
+        self.slot_progress(ui);
+        ui.add_space(4.0);
+        self.decode_list(ui, cmds);
     }
 }
 
