@@ -2125,6 +2125,12 @@ pub struct DigiConfig {
     /// as soon as the queue drains (subject to the straight key's hold).
     #[serde(default = "cw_default_tx_idle_s")]
     pub cw_tx_idle_s: f32,
+    /// Q65: the sub-mode — T/R period and tone-spacing letter together. The
+    /// sub-mode fixes both the period and the tone spacing rather than being
+    /// part of the mode, so it is a setting, exactly as FST4's period is. See
+    /// [`crate::Q65Mode`].
+    #[serde(default)]
+    pub q65_mode: crate::Q65Mode,
 }
 
 fn cw_default_tx_idle_s() -> f32 {
@@ -2313,6 +2319,7 @@ impl Default for DigiConfig {
             sstv_style: SstvStyle::default(),
             cw_sidetone: true,
             cw_tx_idle_s: 5.0,
+            q65_mode: crate::Q65Mode::A30,
         }
     }
 }

@@ -71,7 +71,10 @@ One binary, three ways to run it:
   **WSPR** (transmit and receive, with WSPRnet reporting and optional band
   hopping), receive-only **PI4** (the "Next Generation Beacon" propagation
   mode — 4-FSK, decoded from a rate-1/2 K=32 Fano search across every beacon
-  variant and tone frequency the network uses),
+  variant and tone frequency the network uses), receive-only **Q65** (the
+  modern WSJT weak-signal mode — 65-tone FSK in a 15/30/60/120/300-second
+  T/R period with a tone-spacing letter A–E for Doppler spread, the same
+  77-bit message as FT8),
   **Hellschreiber** (all seven Feld Hell / FSK Hell variants, on a scrolling
   raster), image **SSTV** (Scottie, Martin, Robot), image **RIFP**
   (draft-dulaunoy-rifp-00 — packetised, checksummed pictures over a 4800-baud
@@ -220,6 +223,24 @@ Beacon" network, not a beacon implementation.
 - Tune so the beacon's CW identification and carrier sit at 800 Hz audio —
   the network's own convention — and the four PI4 tones land where the
   decoder searches for them by default.
+
+## Q65
+
+Selecting **Q65** opens the decode list with a sub-mode chip row above it.
+Q65 is the modern WSJT weak-signal mode, built for the paths where FT8 and
+JT65 run out — EME (moonbounce), ionoscatter, rainscatter and troposcatter —
+and it is receive only here.
+
+- The **sub-mode** has two axes: the **T/R period** (15, 30, 60, 120 or 300
+  seconds) and the **tone-spacing letter** (A–E, wider for more Doppler
+  spread). **Q65-60A** is the band convention and the default. Both ends of a
+  contact have to agree, so check what the other station is running.
+- Ten sub-modes are wired: 15A, 30A, 60A–60E, 120D, 120E and 300A.
+- A decode is the same `<to> <from> <grid|report>` as FT8/FT4, since Q65
+  carries the same 77-bit message. Unlike JT65/JT9, Q65 carries a CRC, so a
+  decode is checksummed rather than a claim.
+- On the longer sub-modes expect the list to fill in well after the period
+  ends: a Q65-300 scan is tens of seconds of work over a five-minute slot.
 
 ## Propagation heat map
 

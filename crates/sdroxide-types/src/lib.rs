@@ -42,6 +42,7 @@ mod profile;
 mod prop_store;
 mod propagation;
 pub mod publicsdr;
+mod q65;
 mod qo100;
 mod radio;
 mod rds;
@@ -190,6 +191,7 @@ pub use propagation::{
     obliquity_factor,
 };
 pub use publicsdr::{PublicSdrDirectory, PublicSdrEntry, PublicSdrNetwork};
+pub use q65::Q65Mode;
 pub use qo100::{QO100_BEACON_HZ, Qo100Settings, Qo100Status};
 pub use radio::{
     AirspyConfig, AirspyDevice, AirspyGain, AirspyHfConfig, AirspyHfDevice, AirspyHfModel, Backend,

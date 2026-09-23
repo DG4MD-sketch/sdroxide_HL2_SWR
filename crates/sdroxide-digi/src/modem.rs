@@ -788,6 +788,68 @@ fn join3(a: &str, b: &str, c: &str) -> String {
     [a, b, c].iter().filter(|t| !t.is_empty()).copied().collect::<Vec<_>>().join(" ")
 }
 
+/// Decode one full Q65 slot of 12 kHz mono i16 audio at the chosen sub-mode.
+///
+/// Q65 goes through mfsk-core's `q65::DecodeRequest`, which takes f32 audio
+/// and a `SearchParams`; the ten sub-modes are ten protocol types, so the
+/// request is built per sub-mode. The result carries the message text already
+/// unpacked, so it maps through the same parser every other mode uses.
+pub fn decode_q65_slot(
+    audio_12k: &[i16],
+    mode: sdroxide_types::Q65Mode,
+    slot_utc: i64,
+) -> Vec<Decode> {
+    use mfsk_core::q65::DecodeRequest;
+    use mfsk_core::q65::search::SearchParams;
+
+    let audio: Vec<f32> = audio_12k.iter().map(|&s| f32::from(s) / 28_000.0).collect();
+    // Q65 keys one second into the slot; the scan searches around that, and
+    // its own asymmetric `SearchParams` window carries the tolerance.
+    const NOMINAL_START: usize = 12_000;
+    let params = SearchParams::default();
+
+    macro_rules! run {
+        ($p:ty) => {
+            DecodeRequest::<$p>::new(&audio, DECODE_RATE_U32, NOMINAL_START, params)
+                .decode()
+                .into_iter()
+                .map(|r| {
+                    let p = parse_message(&r.message, MsgKind::Standard);
+                    Decode {
+                        slot_utc,
+                        snr_db: r.snr_db.round() as i16,
+                        dt: r.dt_sec,
+                        audio_hz: r.freq_hz,
+                        message: r.message,
+                        to: p.to,
+                        from: p.from,
+                        grid: p.grid,
+                        is_cq: p.is_cq,
+                        cq_to: p.cq_to,
+                        free_text: false,
+                        rr73_to: None,
+                    }
+                })
+                .collect()
+        };
+    }
+    match mode {
+        sdroxide_types::Q65Mode::A15 => run!(mfsk_core::q65::Q65a15),
+        sdroxide_types::Q65Mode::A30 => run!(mfsk_core::q65::Q65a30),
+        sdroxide_types::Q65Mode::A60 => run!(mfsk_core::q65::Q65a60),
+        sdroxide_types::Q65Mode::B60 => run!(mfsk_core::q65::Q65b60),
+        sdroxide_types::Q65Mode::C60 => run!(mfsk_core::q65::Q65c60),
+        sdroxide_types::Q65Mode::D60 => run!(mfsk_core::q65::Q65d60),
+        sdroxide_types::Q65Mode::E60 => run!(mfsk_core::q65::Q65e60),
+        sdroxide_types::Q65Mode::D120 => run!(mfsk_core::q65::Q65d120),
+        sdroxide_types::Q65Mode::E120 => run!(mfsk_core::q65::Q65e120),
+        sdroxide_types::Q65Mode::A300 => run!(mfsk_core::q65::Q65a300),
+    }
+}
+
+/// mfsk-core's Q65 entry points take a `u32` rate; the workspace's is `f64`.
+const DECODE_RATE_U32: u32 = 12_000;
+
 /// Unpack 77 message bits and build a [`Decode`], or `None` if unpacking fails.
 /// `hashes` resolves the `<...>` placeholders of hashed callsigns, and
 /// `eu_hashes` the ones the EU VHF contest layout uses — see [`eu_vhf::Hashes`]
@@ -1060,6 +1122,60 @@ mod tests {
         slot.resize((slot_s * 12_000.0) as usize, 0.0);
         let i16buf: Vec<i16> = slot.iter().map(|&s| (s * 20_000.0) as i16).collect();
         (sent, modem.decode_slot(&i16buf, 0, &ApHints::default(), 1500.0))
+    }
+
+    /// A synthesized Q65 message decodes back at every sub-mode — the round trip
+    /// the controller makes. Q65 shares FT8's 77-bit message, so the message is
+    /// expected whole; the sub-mode decides both the slot the audio is padded
+    /// into and the protocol type the decode is run as.
+    ///
+    /// `#[ignore]`d because a Q65 scan is tens of seconds of work even at the
+    /// short sub-modes, and a 300 s slot is a minute of decode on its own; run
+    /// it with `cargo test -p sdroxide-digi --release -- --ignored q65`. The
+    /// cheapest sub-mode has its own unignored smoke test below.
+    #[test]
+    #[ignore = "Q65 scans are slow; run with --release -- --ignored"]
+    fn q65_messages_round_trip_at_every_sub_mode() {
+        use sdroxide_types::Q65Mode;
+
+        q65_round_trip::<mfsk_core::q65::Q65a15>(Q65Mode::A15);
+        q65_round_trip::<mfsk_core::q65::Q65a30>(Q65Mode::A30);
+        q65_round_trip::<mfsk_core::q65::Q65a60>(Q65Mode::A60);
+        q65_round_trip::<mfsk_core::q65::Q65b60>(Q65Mode::B60);
+        q65_round_trip::<mfsk_core::q65::Q65c60>(Q65Mode::C60);
+        q65_round_trip::<mfsk_core::q65::Q65d60>(Q65Mode::D60);
+        q65_round_trip::<mfsk_core::q65::Q65e60>(Q65Mode::E60);
+        q65_round_trip::<mfsk_core::q65::Q65d120>(Q65Mode::D120);
+        q65_round_trip::<mfsk_core::q65::Q65e120>(Q65Mode::E120);
+        q65_round_trip::<mfsk_core::q65::Q65a300>(Q65Mode::A300);
+    }
+
+    /// The Q65 round trip at the cheapest sub-mode, so an ordinary test run
+    /// still exercises the decoder. The full sweep is `#[ignore]`d above.
+    #[test]
+    fn q65_message_round_trips() {
+        q65_round_trip::<mfsk_core::q65::Q65a15>(sdroxide_types::Q65Mode::A15);
+    }
+
+    /// Synthesize a `CQ K1ABC FN42` at sub-mode `m`, pad it into a whole slot at
+    /// the one-second TX offset, and assert it decodes back.
+    fn q65_round_trip<P: mfsk_core::engine::ModulationParams>(m: sdroxide_types::Q65Mode) {
+        let burst = mfsk_core::q65::tx::synthesize_standard_for::<P>(
+            "CQ", "K1ABC", "FN42", 12_000, 1000.0, 0.3,
+        )
+        .expect("synthesize");
+        let mut slot = vec![0.0f32; (m.start_delay_s() * 12_000.0).round() as usize];
+        slot.extend_from_slice(&burst);
+        slot.resize((m.slot_s() * 12_000.0) as usize, 0.0);
+        let i16buf: Vec<i16> = slot.iter().map(|&s| (s * 20_000.0) as i16).collect();
+
+        let decodes = decode_q65_slot(&i16buf, m, 0);
+        let best = decodes
+            .iter()
+            .find(|d| d.from.as_deref() == Some("K1ABC"))
+            .unwrap_or_else(|| panic!("Q65-{}: nothing decoded: {decodes:?}", m.label()));
+        assert!(best.is_cq, "Q65-{}: {decodes:?}", m.label());
+        assert_eq!(best.grid.as_deref(), Some("FN42"), "Q65-{}", m.label());
     }
 
     #[test]

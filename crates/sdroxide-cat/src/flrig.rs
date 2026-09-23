@@ -582,6 +582,7 @@ fn candidates(m: Mode) -> &'static [&'static str] {
         | Mode::Js8
         | Mode::Wspr
         | Mode::Pi4
+        | Mode::Q65
         | Mode::Ft4
         | Mode::Ft2
         | Mode::Psk

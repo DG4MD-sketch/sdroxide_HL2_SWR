@@ -92,7 +92,9 @@ pub fn make_modulator(mode: Mode, rate: f64, passband: (f32, f32)) -> Option<Box
         // PI4 is receive only here — a decoder for a beacon network's
         // signal, not a beacon implementation (see `Mode::Pi4`'s own doc
         // comment) — so like ACARS and ISB it has no modulator to transmit
-        // with.
+        // with. Q65 is receive-only in this build too: transmit needs a
+        // sequencer, so there is no modulator rather than one that would put
+        // an unsequenced burst on the air under a Q65 label.
         Mode::Pi4
         | Mode::Cw
         | Mode::Wfm
@@ -102,7 +104,8 @@ pub fn make_modulator(mode: Mode, rate: f64, passband: (f32, f32)) -> Option<Box
         | Mode::Adsb
         | Mode::Vdl2
         | Mode::Ais
-        | Mode::Hfdl => None,
+        | Mode::Hfdl
+        | Mode::Q65 => None,
     }
 }
 
