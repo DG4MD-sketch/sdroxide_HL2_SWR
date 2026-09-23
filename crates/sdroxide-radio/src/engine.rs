@@ -9607,6 +9607,9 @@ impl Engine {
                 // else, and the band stack, the band buttons and the transmit
                 // lockout all key off `state.band`.
                 self.state.band = Band::containing(self.state.active_freq_hz());
+                // So does the band decoder, which only looks again when a dial
+                // moves (issue #442).
+                self.relay_bands_told = None;
                 self.emit_station_config();
             }
             SetCessb(db) => {
@@ -9653,6 +9656,7 @@ impl Engine {
                 // Same reason as `SetRegion`: the dial has not moved but the
                 // band under it may have.
                 self.state.band = Band::containing(self.state.active_freq_hz());
+                self.relay_bands_told = None;
                 self.emit_station_config();
                 // Whatever the loader had to say — a row it dropped, a file it
                 // could not read — reaches the operator who asked for the
