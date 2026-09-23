@@ -2359,6 +2359,52 @@ mod tests {
         sdroxide_types::StationConfig::default()
     }
 
+    /// The T/R switch's configuration, both ways, with a band decoder in it
+    /// (issue #442). The role and the band table are its newest parts, and a
+    /// row that decoded onto the wrong band or into the wrong word would
+    /// switch the wrong filter. Filled in rather than defaulted, for
+    /// `roundtrip_radio_config`'s reason.
+    #[test]
+    fn roundtrip_relay_config() {
+        use sdroxide_types::{
+            Band, RelayBandRow, RelayChannel, RelayConfig, RelayLink, RelayRole, StationConfig,
+        };
+
+        let relay = RelayConfig {
+            link: RelayLink::Hid,
+            device: "/dev/hidraw3".into(),
+            channels: vec![
+                RelayChannel {
+                    index: 1,
+                    role: RelayRole::SdrAntenna,
+                    label: "SDR".into(),
+                    active_high: true,
+                    lead_ms: 15,
+                    hold_ms: 30,
+                },
+                RelayChannel {
+                    index: 4,
+                    role: RelayRole::BandDecoder,
+                    label: "20 m BPF".into(),
+                    active_high: false,
+                    lead_ms: 8,
+                    hold_ms: 12,
+                },
+            ],
+            band_table: vec![
+                RelayBandRow { band: Band::M20, rx_mask: 0b1000, tx_mask: 0b1000 },
+                RelayBandRow { band: Band::Gen, rx_mask: 0, tx_mask: 0b1000 },
+            ],
+            ..RelayConfig::default()
+        };
+        let cmd = ClientMsg::Command(Command::SetRelayConfig(Box::new(relay.clone())));
+        let back: ClientMsg = decode(&encode(&cmd).unwrap()).unwrap();
+        assert_eq!(back, cmd);
+        let m = ServerMsg::StationConfig(Box::new(StationConfig { relay, ..no_station() }));
+        let back: ServerMsg = decode(&encode(&m).unwrap()).unwrap();
+        assert_eq!(back, m);
+    }
+
     /// The interface configuration, both ways.
     ///
     /// Worth its own test for `roundtrip_station_config`'s reason: every field
