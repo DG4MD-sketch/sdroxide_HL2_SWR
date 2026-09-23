@@ -26,6 +26,7 @@ pub mod helio;
 pub mod imagery;
 pub mod impact;
 pub mod indices;
+pub mod meteor;
 pub mod planets;
 pub mod satellites;
 pub mod satfreq;
@@ -49,6 +50,7 @@ pub use indices::{
     BandConditions, BandRating, GeomagneticIndex, HfBandCondition, MufEstimate, SolarFlux,
     SpaceWeather, VhfCondition, XrayLevel,
 };
+pub use meteor::{ActiveShower, Shower, active_at, radiant_altaz, SHOWERS};
 pub use planets::{Moon, Planet, Surface};
 pub use satellites::{Observation, Pass, PassSearch, SatState, Satellite};
 pub use satfreq::{Passband, SatFreqs, SatLink};
