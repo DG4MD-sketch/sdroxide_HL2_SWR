@@ -188,6 +188,7 @@ pub fn make_demod(mode: Mode, channel_rate: f64) -> Option<Box<dyn Demodulator>>
         | Mode::Pi4
         | Mode::Ft4
         | Mode::Ft2
+        | Mode::Msk144
         | Mode::Psk
         | Mode::Rtty
         | Mode::Sstv

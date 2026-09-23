@@ -71,7 +71,10 @@ One binary, three ways to run it:
   **WSPR** (transmit and receive, with WSPRnet reporting and optional band
   hopping), receive-only **PI4** (the "Next Generation Beacon" propagation
   mode — 4-FSK, decoded from a rate-1/2 K=32 Fano search across every beacon
-  variant and tone frequency the network uses),
+  variant and tone frequency the network uses), receive-only **MSK144**
+  (meteor scatter on 6 m and 2 m — continuous-phase binary MSK in a
+  15-second period, the decoder hunting each period for the brief
+  meteor-trail bursts),
   **Hellschreiber** (all seven Feld Hell / FSK Hell variants, on a scrolling
   raster), image **SSTV** (Scottie, Martin, Robot), image **RIFP**
   (draft-dulaunoy-rifp-00 — packetised, checksummed pictures over a 4800-baud
@@ -220,6 +223,23 @@ Beacon" network, not a beacon implementation.
 - Tune so the beacon's CW identification and carrier sit at 800 Hz audio —
   the network's own convention — and the four PI4 tones land where the
   decoder searches for them by default.
+
+## MSK144
+
+Selecting **MSK144** opens the decode list alone: a reception list of the
+meteor-scatter pings heard, with time, signal estimate, audio offset and the
+decoded message. It is the standard way to work 6 m and 2 m "meteor scatter"
+contacts, and it is receive only here.
+
+- MSK144 runs on a **15-second T/R period** and an operator transmits
+  *continuously* through it, so the decoder scans the whole period for the
+  short ionised-trail bursts a meteor leaves rather than reading a frame at a
+  fixed offset. A row's **DT** is therefore not an offset from a frame start
+  but **how far into the period** the burst was found.
+- It carries the same 77-bit message as FT8, so a decode reads the same way.
+- Tune to the meteor-scatter calling frequencies — for example **50.260 MHz**
+  on 6 m and **144.200 MHz** on 2 m — and leave the audio cursor alone: the
+  decoder searches the whole audio passband.
 
 ## Propagation heat map
 

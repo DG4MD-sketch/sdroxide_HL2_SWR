@@ -102,7 +102,8 @@ pub fn make_modulator(mode: Mode, rate: f64, passband: (f32, f32)) -> Option<Box
         | Mode::Adsb
         | Mode::Vdl2
         | Mode::Ais
-        | Mode::Hfdl => None,
+        | Mode::Hfdl
+        | Mode::Msk144 => None,
     }
 }
 

@@ -18,11 +18,12 @@ or connects to a remote sdroxide server.
 2. [Basic operation](#2-basic-operation)
     - [2.20 HD Radio (NRSC-5)](#220-hd-radio-nrsc-5)
     - [2.22 QO-100 beacon plugin](#222-qo-100-beacon-plugin)
-3. [Digital modes (FT8, FT4, FT2, PSK31, RTTY, Olivia, THOR, FSQ, Hellschreiber, SSTV, RIFP, weather fax, JS8, RF Paint, WSPR, PI4, packet, APRS, ADS-B, NAVTEX, ACARS, VDL2, AIS, HFDL, AtCHAT NET)](#3-digital-modes)
+3. [Digital modes (FT8, FT4, FT2, MSK144, PSK31, RTTY, Olivia, THOR, FSQ, Hellschreiber, SSTV, RIFP, weather fax, JS8, RF Paint, WSPR, PI4, packet, APRS, ADS-B, NAVTEX, ACARS, VDL2, AIS, HFDL, AtCHAT NET)](#3-digital-modes)
     - [3.17 AtCHAT NET](#317-atchat-net)
     - [3.18 ACARS](#318-acars-airline-datalink-on-airband)
     - [3.19 HFDL](#319-hfdl-aircraft-on-shortwave)
     - [3.20 PI4](#320-pi4-next-generation-beacon)
+    - [3.21 MSK144](#321-msk144)
 4. [Skimmers (CW, PSK, RTTY)](#4-skimmers)
 5. [ISM band decoder (315 / 345 / 433 / 868 / 915 MHz devices)](#5-ism-band-decoder)
 6. [Settings](#6-settings)
@@ -321,7 +322,7 @@ popup with three rows:
   has a standard calling frequency carry a cyan underline; see
   [§3.1](#31-general-considerations).
 - **MODE:** `LSB USB CW AM SAM NFM WFM DRM HD DIGU DIGL DSB ISB SPEC`.
-- **DIGITAL:** `FT8 FT4 PSK RTTY RTTY-FM OLIVIA THOR FSQ HELL SSTV SSTV-FM NAVTEX RIFP RFPAINT RADE` (see
+- **DIGITAL:** `FT8 FT4 MSK144 PSK RTTY RTTY-FM OLIVIA THOR FSQ HELL SSTV SSTV-FM NAVTEX RIFP RFPAINT RADE` (see
   [Digital modes](#3-digital-modes)).
 
 ![The band and mode selector popup](images/04-band-mode-popup.jpg)
@@ -5803,6 +5804,46 @@ Generation Beacon" transmission — there are beacons on 6 m through 23 cm and
 higher. Receive only: there is no transmit half of this panel, and there
 never will be — this decoder exists to listen to the network, not to join
 it.
+
+### 3.21 MSK144
+
+**MSK144** is the **meteor-scatter** mode: it works by bouncing a signal off
+the brief, random ionised trail a meteor leaves in the upper atmosphere,
+which exists for a fraction of a second to a few seconds at a time. It is the
+standard way to work 6 m and 2 m "meteor scatter" contacts, and it is fast for
+a weak-signal mode — a complete exchange can be done in a minute when the
+meteors cooperate, which is why it carries the same short 77-bit message as
+FT8.
+
+#### Where it is
+
+6 m and 2 m, on the meteor-scatter calling frequencies — for example
+**50.260 MHz** on 6 m and **144.200 MHz** on 2 m. Tune the dial there and
+leave the audio cursor alone: the decoder searches the whole audio passband.
+
+#### What you see
+
+One pane, the **DECODES** list, newest first, exactly the list FT8 and FT4
+use: the time, the SNR, the audio offset, and the decoded
+`<to> <from> <grid|report>`. One column reads differently from the frame-based
+modes: the **DT** is not an offset from a frame start — MSK144 has no fixed
+frame position — but **how far into the 15-second period** the meteor burst
+was found, so a row at 6.4 s is a ping that arrived 6.4 seconds after the
+period began.
+
+#### How the period works
+
+MSK144 runs on a **15-second T/R period**, and an operator transmits
+*continuously* through it: the 72 ms frame repeats back to back, so whenever a
+meteor trail appears it catches part of one. The decoder scans the whole
+period for those captures — there is no slot-aligned decode the way FT8 has,
+and a whole period may pass with nothing.
+
+#### What you need
+
+Nothing beyond an SSB receiver on 6 m or 2 m. Receive only: there is no
+transmit half of this panel, as for PI4 — what it does is copy the pings that
+arrive.
 
 ## 4. Skimmers
 
