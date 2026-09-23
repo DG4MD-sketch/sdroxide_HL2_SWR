@@ -12203,8 +12203,10 @@ Each row in the **Contacts** table is one switched contact:
   which on a Raspberry Pi is the BCM number and not the physical pin number.
 - **Name** — yours. It appears in the status line and the log, so "IC-7300
   antenna" beats "channel 1".
-- **Job** — grounding the SDR antenna, keying an amplifier or T/R relay, or
-  auxiliary. It only chooses the default timings and what the log calls it.
+- **Job** — grounding the SDR antenna, keying an amplifier or T/R relay,
+  auxiliary, or a band decoder ([6.11.7](#6117-band-decoder-outputs)). For the
+  first three it only chooses the default timings and what the log calls it; a
+  band decoder follows the band table as well as the over.
 - **TX closes** — whether *transmitting* energises the coil. This is a wiring
   decision, not a preference; see [6.11.4](#6114-wire-it-so-that-a-dead-relay-is-the-safe-one).
 - **Lead** — how long before RF the contact closes.
@@ -12324,6 +12326,50 @@ J16 open-collector outputs; see [6.2.3](#623-hpsdr-network-radios).
 - **Reporting a fault.** Settings → Radio → the diagnostic report includes what
   the switch was told and what it answered. On these boards there is no other
   record of anything, anywhere.
+
+#### 6.11.7 Band decoder outputs
+
+A contact's **Job** can be **Band decoder (filter / transverter)** instead of
+grounding the antenna or keying an amplifier — for a station with per-band
+external hardware in front of the radio: a bank of band-pass filters on
+receive, low-pass filters on transmit, or a transverter selector, on a
+PlutoSDR, a LibreSDR, or anything else that has no band-aware output of its
+own (issue #442). The same idea as an HPSDR board's open-collector band code
+([6.2.3](#623-hpsdr-network-radios)), generalised to whatever this relay
+hardware actually is — a USB relay board, a GPIO header, a HID relay, or an
+external command.
+
+A retune moves a band-decoder contact the instant the band changes. Keying
+is different: going from a band's RX word to its TX word is an on-air edge
+like any other, so a band-decoder contact has a **Lead** and a **Hold** of
+its own and is sequenced exactly like the antenna relay and the amplifier —
+a transmit-only low-pass filter is in circuit its lead before RF, and out
+only its hold after. Its lead counts toward how long transmit waits. That is
+true even of a contact whose RX and TX bits agree, because a split across
+bands changes every one of them at key-down. It shares the same board as any
+ordinary on-air-driven contact without disturbing them.
+
+Once at least one contact has the role, a **Band decoder outputs** table
+appears below the sequencer. One row per band, two control words each — RX
+and TX — read the same way the HPSDR OC table is: bit 0 is contact 1, bit 6
+is contact 7. Give RX and TX the same value for a filter that does not care
+which way the RF is going; give them different ones for a receive-only preamp
+bypass or a transmit-only LPF bank that must not be in circuit on receive. A
+band left at `0x00` asserts nothing. The **Outputs asserted** column names the
+contacts a word actually closes, so you never have to work the bit pattern
+out by hand.
+
+The RX word is the receive dial's band, on the primary radio — the bank
+belongs to the station. The TX word is the transmit dial's band of whichever
+radio keyed, so on a multi-radio station the filters follow the radio that is
+actually transmitting, and a split operator's follow where the RF is going.
+Retuning the transmitter *during* an over does not move a filter that is
+carrying RF: the new band is taken after that over's hold, or at the next
+key-down. Behind a
+[transverter table](#62-radio-choosing-and-configuring-the-rig) that is the
+true dial, the same one the HPSDR OC decoder follows: the filters, relays
+and transverter this switches belong to the band on the air, not to the
+intermediate frequency underneath it.
 
 ### 6.12 Profiles: saved station setups
 

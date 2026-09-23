@@ -219,8 +219,9 @@ pub use rds::{
 };
 pub use region::{Region, region, set_region};
 pub use relay::{
-    DEFAULT_HOLD_MS, DEFAULT_LEAD_MS, FailSafe, MAX_CHANNEL, RelayChannel, RelayConfig,
-    RelayDevice, RelayFamily, RelayLink, RelayRole, RelayStatus, SenseConfig, SenseLine,
+    DEFAULT_HOLD_MS, DEFAULT_LEAD_MS, FailSafe, MAX_CHANNEL, RelayBandRow, RelayChannel,
+    RelayConfig, RelayDevice, RelayFamily, RelayLink, RelayRole, RelayStatus, SenseConfig,
+    SenseLine,
 };
 pub use repeater::{
     BURST_MS_RANGE, DCS_CODES, MAX_OFFSET_HZ, RepeaterState, Shift, TONE_BURST_HZ, ToneMode,

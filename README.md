@@ -141,7 +141,13 @@ One binary, three ways to run it:
   interface that wants a PTT closure, a Raspberry Pi GPIO line, or an external
   command. An optional transmit-sense input on the same port sees a rig keyed at
   its own microphone in milliseconds instead of the few hundred a CAT poll
-  takes. See "T/R switch" in the user manual for what this cannot do.
+  takes. A contact can also be given a **band-decoder** role instead, switched
+  by which band the dial is on — a per-band RX/TX output table, the RX-to-TX
+  move sequenced on the same lead and hold as every other contact. The same
+  idea as the HPSDR filter board's open-collector band code (below) but for
+  this same generic relay hardware, for driving an outboard band-pass/low-pass filter bank or a transverter selector on a
+  PlutoSDR, a LibreSDR, or any other front end without HPSDR's own seven-pin
+  bus. See "T/R switch" in the user manual for what this cannot do.
 - **Persistence** — device, rates, gains, memories, band stacks, the FT8/FT4/FT2
   operator profile, network/QSL credentials, control bindings, and the logbook
   are all stored under `~/.config/sdroxide/`.
