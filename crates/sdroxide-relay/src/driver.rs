@@ -1053,9 +1053,9 @@ mod tests {
     }
 
     /// Contact 1 a 20 m band-pass filter, in circuit both ways. Contact 2 a
-    /// 20 m transmit-only LPF, the case the review was about. Contact 3 a 40 m
-    /// band-pass filter wired active-low. Contact 4 an amplifier. Leads 10,
-    /// 20, 10, 5 — so the LPF closes first and the amplifier last.
+    /// 20 m transmit-only LPF, the case that most needs sequencing. Contact 3
+    /// a 40 m band-pass filter wired active-low. Contact 4 an amplifier.
+    /// Leads 10, 20, 10, 5 — so the LPF closes first and the amplifier last.
     fn band_decoder_cfg() -> RelayConfig {
         RelayConfig {
             link: RelayLink::Gpio,
@@ -1119,9 +1119,9 @@ mod tests {
         assert_eq!(s.due(t0), Some(0b0100 ^ INV), "20 m filter out, 40 m filter in");
     }
 
-    /// The review's blocker: a transmit-only LPF must be in circuit *before*
-    /// RF, on its own lead, and out only after its hold — never switched at
-    /// the moment the transmitter is already putting power into it.
+    /// The claim that matters most: a transmit-only LPF must be in circuit
+    /// *before* RF, on its own lead, and out only after its hold — never
+    /// switched at the moment the transmitter is already putting power into it.
     #[test]
     fn a_transmit_only_word_rides_the_on_air_ramp() {
         let t0 = Instant::now();

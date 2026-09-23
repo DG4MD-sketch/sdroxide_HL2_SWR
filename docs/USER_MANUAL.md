@@ -12353,13 +12353,13 @@ ordinary on-air-driven contact without disturbing them.
 
 Once at least one contact has the role, a **Band decoder outputs** table
 appears below the sequencer. One row per band, two control words each — RX
-and TX — read the same way the HPSDR OC table is: bit 0 is contact 1, bit 6
-is contact 7. Give RX and TX the same value for a filter that does not care
-which way the RF is going; give them different ones for a receive-only preamp
-bypass or a transmit-only LPF bank that must not be in circuit on receive. A
-band left at `0x00` asserts nothing. The **Outputs asserted** column names the
-contacts a word actually closes, so you never have to work the bit pattern
-out by hand.
+and TX — read the same way the HPSDR OC table is: bit 0 is contact 1, bit 1
+contact 2, and so on up to contact 32. Give RX and TX the same value for a
+filter that does not care which way the RF is going; give them different ones
+for a receive-only preamp bypass or a transmit-only LPF bank that must not be
+in circuit on receive. A band left at `0x00` asserts nothing. The **Outputs
+asserted** column names the contacts a word actually closes, so you never have
+to work the bit pattern out by hand.
 
 The RX word is the receive dial's band, on the primary radio — the bank
 belongs to the station. The TX word is the transmit dial's band of whichever

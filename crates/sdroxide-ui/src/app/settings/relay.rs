@@ -570,10 +570,10 @@ fn relay_band_table(ui: &mut egui::Ui, cfg: &mut RelayConfig) {
     ui.add_space(2.0);
     ui.label(
         RichText::new(
-            "One control word per band: bit 0 is contact 1, bit 6 is contact 7, matching the \
-             numbering above. RX follows the receive dial's band; TX the band of whichever radio \
-             keyed, switched in on each contact's lead before RF and back after its hold — \
-             give them the same value for a filter that does not care which way the RF is \
+            "One control word per band: bit 0 is contact 1, bit 1 contact 2 and so on, matching \
+             the numbering above. RX follows the receive dial's band; TX the band of whichever \
+             radio keyed, switched in on each contact's lead before RF and back after its hold \
+             — give them the same value for a filter that does not care which way the RF is \
              going, and different ones for a receive-only preamp bypass or a transmit-only LPF \
              bank. Bands left at 0 assert nothing. Applies on Apply / reconnect.",
         )

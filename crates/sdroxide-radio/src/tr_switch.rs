@@ -436,9 +436,8 @@ mod tests {
         s.set_tx_band(0, Band::M20);
     }
 
-    /// The multi-radio half of the review: the filters follow the radio that
-    /// keyed, not the primary, and keep following it until the last radio is
-    /// off the air.
+    /// On a multi-radio station the filters follow the radio that keyed, not
+    /// the primary, and keep following it until the last radio is off the air.
     #[test]
     fn the_band_decoder_follows_the_radio_that_keyed() {
         let s = TrSwitch::new();
