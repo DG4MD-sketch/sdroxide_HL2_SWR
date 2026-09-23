@@ -544,3 +544,58 @@ fn a_satellite_lock_switches_the_band_decoder_to_the_uplink_band() {
     st.wait_state(TWO_M);
     st.shutdown();
 }
+
+/// On a two-radio station the receive word is the primary's band, and the
+/// transmit word the band of whichever radio keyed: the second radio on 40 m
+/// keys while the primary listens on 20 m, and the 40 m filter is what goes
+/// in line — then the 20 m one comes back when the over ends.
+#[test]
+fn the_band_decoder_follows_the_radio_that_keyed() {
+    use sdroxide_types::{Band, RelayBandRow};
+    const TWENTY: ChannelMask = 0b010;
+    const FORTY: ChannelMask = 0b100;
+    let filter = |index: u8| RelayChannel {
+        index,
+        role: RelayRole::BandDecoder,
+        label: format!("filter {index}"),
+        active_high: true,
+        lead_ms: LEAD_MS,
+        hold_ms: HOLD_MS,
+    };
+    let mut cfg = relay_cfg();
+    cfg.channels.extend([filter(2), filter(3)]);
+    cfg.band_table = vec![
+        RelayBandRow { band: Band::M20, rx_mask: TWENTY, tx_mask: TWENTY },
+        RelayBandRow { band: Band::M40, rx_mask: FORTY, tx_mask: FORTY },
+    ];
+    let st = station_with(2, cfg, caps());
+    st.engines[1]
+        .cmd_tx
+        .send(Command::SetVfo { vfo: sdroxide_types::Vfo::A, hz: 7_074_000.0 })
+        .unwrap();
+    // The primary is on 20 m, so that is the receive word.
+    st.wait_state(TWENTY);
+    assert_eq!(st.changes().last().map(|(_, m)| *m), Some(TWENTY), "never settled on 20 m");
+
+    st.key(1, true);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while st.rigs[1].lock().unwrap().keyed.is_empty() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(!st.rigs[1].lock().unwrap().keyed.is_empty(), "the second radio never keyed");
+    let on_air = st.changes().last().map(|(_, m)| *m);
+    assert_eq!(
+        on_air,
+        Some(0b001 | FORTY),
+        "the 40 m radio keyed with the contacts at {on_air:?}, not the 40 m filter"
+    );
+
+    st.key(1, false);
+    st.wait_state(TWENTY);
+    assert_eq!(
+        st.changes().last().map(|(_, m)| *m),
+        Some(TWENTY),
+        "the primary's 20 m filter did not come back after the over"
+    );
+    st.shutdown();
+}
