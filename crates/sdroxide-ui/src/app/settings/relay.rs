@@ -232,6 +232,10 @@ pub(in crate::app) fn settings_relay_tab(
             cfg.gpio_lines.resize(want, 0);
         }
     }
+    // Not offered where every contact is one on/off — see
+    // `RelayLink::switches_contacts_separately`. A contact that already has
+    // the job keeps showing it, so the refusal below names something visible.
+    let band_decoder_ok = cfg.link.switches_contacts_separately();
     let mut remove: Option<usize> = None;
     let cols = if gpio { 8 } else { 7 };
     egui::Grid::new("relay-channels").num_columns(cols).spacing([10.0, 6.0]).show(ui, |ui| {
@@ -285,6 +289,9 @@ pub(in crate::app) fn settings_relay_tab(
                         RelayRole::BandDecoder,
                         RelayRole::Unused,
                     ] {
+                        if r == RelayRole::BandDecoder && !band_decoder_ok && ch.role != r {
+                            continue;
+                        }
                         if ui.selectable_label(ch.role == r, r.label()).clicked() {
                             ch.role = r;
                             let (lead, hold) = r.default_timing();

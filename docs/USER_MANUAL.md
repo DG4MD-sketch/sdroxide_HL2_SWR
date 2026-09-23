@@ -12336,8 +12336,10 @@ receive, low-pass filters on transmit, or a transverter selector, on a
 PlutoSDR, a LibreSDR, or anything else that has no band-aware output of its
 own (issue #442). The same idea as an HPSDR board's open-collector band code
 ([6.2.3](#623-hpsdr-network-radios)), generalised to whatever this relay
-hardware actually is — a USB relay board, a GPIO header, a HID relay, or an
-external command.
+hardware actually is — a USB relay board (serial or HID), a GPIO header, or the
+two RTS/DTR lines. Not a CM108 pin or an external command: each of those is a
+single on/off for every contact, so a band's RX word would key it for as long
+as you were receiving there, and the settings refuse the combination.
 
 A retune moves a band-decoder contact the instant the band changes. Keying
 is different: going from a band's RX word to its TX word is an on-air edge

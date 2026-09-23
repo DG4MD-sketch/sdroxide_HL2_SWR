@@ -125,6 +125,15 @@ impl RelayLink {
     pub fn has_numbered_channels(self) -> bool {
         matches!(self, RelayLink::Serial | RelayLink::Hid | RelayLink::Gpio)
     }
+
+    /// Whether each contact switches on its own. A sound card's one pin and
+    /// the command hook's key-down/key-up pair are a single on/off whatever
+    /// the contact table says — anything asserted is "transmit" — so a band
+    /// decoder, whose receive word is asserted while receiving, would key
+    /// them for as long as the dial sat on a band with a row.
+    pub fn switches_contacts_separately(self) -> bool {
+        !matches!(self, RelayLink::Cm108 | RelayLink::Command)
+    }
 }
 
 /// Which serial relay board. They differ only in what a "close channel 2" looks
@@ -547,6 +556,15 @@ impl RelayConfig {
         if self.active_channels().next().is_none() {
             return Some("no T/R switch channel has been given a job".to_string());
         }
+        if !self.link.switches_contacts_separately()
+            && self.channels.iter().any(|c| c.role == RelayRole::BandDecoder)
+        {
+            return Some(format!(
+                "a band decoder needs contacts that switch one at a time, and the \"{}\" \
+                 link is a single on/off",
+                self.link.label()
+            ));
+        }
         if let Some(c) = self.channels.iter().find(|c| c.index == 0 || c.index > MAX_CHANNEL) {
             return Some(format!(
                 "T/R switch channel number {} is out of range (1–{MAX_CHANNEL})",
@@ -718,6 +736,33 @@ mod tests {
         };
         assert_eq!(cfg.band_mask(crate::Band::M20, false), 0);
         assert_eq!(cfg.band_mask(crate::Band::M20, true), 0);
+    }
+
+    /// A CM108 pin or a command hook turns any asserted contact into
+    /// "transmit", so a band row's receive word would key the PTT line — or
+    /// run the transmit command — for as long as the dial sat on that band.
+    #[test]
+    fn a_band_decoder_on_a_single_on_off_link_is_refused() {
+        for link in [RelayLink::Cm108, RelayLink::Command] {
+            let cfg = RelayConfig {
+                link,
+                device: "card".into(),
+                tx_cmd: "key".into(),
+                ..band_decoder_cfg()
+            };
+            let why = cfg.refusal();
+            assert!(
+                why.as_deref().is_some_and(|w| w.contains("band decoder")),
+                "{link:?} took a band decoder: {why:?}"
+            );
+        }
+        // Each RTS/DTR line switches on its own, so two outputs work there.
+        let lines = RelayConfig {
+            link: RelayLink::SerialLines,
+            serial: SerialConfig { path: "/dev/ttyUSB0".into(), ..SerialConfig::default() },
+            ..band_decoder_cfg()
+        };
+        assert_eq!(lines.refusal(), None);
     }
 
     #[test]
