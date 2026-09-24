@@ -414,15 +414,7 @@ fn dedup_spaces(s: &str) -> String {
     out
 }
 
-fn median(v: &mut [f32]) -> f32 {
-    if v.is_empty() {
-        return 0.0;
-    }
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    v[v.len() / 2]
-}
-
-/// The ping search: block energy, a median noise floor and a run above it.
+/// The ping search: block energy, a noise floor and a run above it.
 ///
 /// Returns the pings found in one slot, in time order. Each carries its text
 /// (empty pings are dropped), where it sat and an approximate SNR. This is the
@@ -460,15 +452,20 @@ pub fn fsk441_find_pings(slot: &[f32]) -> Vec<Fsk441Ping> {
         .map(|b| tone_env[b * block..(b + 1) * block].iter().copied().fold(0.0f32, f32::max))
         .collect();
 
-    let mut sorted = blocks.clone();
-    let base = median(&mut sorted);
-    if base <= 0.0 {
+    let peak = blocks.iter().copied().fold(0.0f32, f32::max);
+    if peak <= 1e-30 {
         return Vec::new();
     }
-    // 4x the median of a max-of-four statistic is a little over 6 dB clear of
-    // the noise floor — high enough that a random block does not trip it, low
-    // enough that a real ping does.
-    let thresh = base * 4.0;
+    // The floor is the quietest block — silence when there is any, and the
+    // deepest fade between passes otherwise. But when even the quietest block
+    // is close to the loudest the buffer is signal from end to end (an operator
+    // transmits the message over and over, and there is no noise in it to
+    // threshold against at all), so the whole buffer is the run: `4 × floor`
+    // would sit above the signal and report nothing. `decode_ping` then reads
+    // the dits and rejects the run if it cannot.
+    let floor = blocks.iter().copied().fold(f32::INFINITY, f32::min);
+    let all_signal = floor > 0.5 * peak;
+    let thresh = if all_signal { 0.0 } else { floor * 4.0 };
 
     let mut pings = Vec::new();
     let mut b = 0usize;
@@ -510,7 +507,7 @@ pub fn fsk441_find_pings(slot: &[f32]) -> Vec<Fsk441Ping> {
             audio_hz: (FSK441_TONES[0] + FSK441_TONES[3]) / 2.0 + df,
             start_s: start as f32 / FSK441_RATE as f32,
             duration_s: (end - start) as f32 / FSK441_RATE as f32,
-            snr_db: 10.0 * (peak / base).max(1.0).log10(),
+            snr_db: 10.0 * (peak / floor.max(1e-30)).max(1.0).log10(),
             confidence,
         });
     }
@@ -643,7 +640,6 @@ mod tests {
     /// gates are what keep the list honest.
     #[test]
     fn noise_alone_does_not_decode() {
-        // A deterministic pseudo-random sequence, so the test cannot flake.
         let mut state = 0x1234_5678u32;
         let mut slot = Vec::with_capacity(55_125);
         for _ in 0..55_125 {
@@ -652,6 +648,27 @@ mod tests {
         }
         let pings = fsk441_find_pings(&slot);
         assert!(pings.is_empty(), "noise decoded as {pings:?}");
+    }
+
+    /// A message transmitted the way the mode is worked — the pass repeated back
+    /// to back with no silence between them — decodes. This is the regression
+    /// for the ping search's noise floor: with a signal end to end there is no
+    /// silent block, and a *median* floor sat at the signal level so nothing was
+    /// ever reported. The floor is now the quietest block, which is under the
+    /// signal whether or not the buffer has silence in it.
+    #[test]
+    fn a_continuously_repeated_message_decodes() {
+        let msg = "W1ABC W9XYZ FN42";
+        let pass = fsk441_generate_audio(&fsk441_encode_tones(msg));
+        let mut slot = Vec::new();
+        while slot.len() < FSK441_RATE as usize {
+            slot.extend_from_slice(&pass);
+        }
+        let pings = fsk441_find_pings(&slot);
+        assert!(
+            pings.iter().any(|p| p.text.contains("W1ABC")),
+            "a repeated message did not decode: {pings:?}"
+        );
     }
 
     /// The text out of a very short fragment is a fragment, not a crash: the
