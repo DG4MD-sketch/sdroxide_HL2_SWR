@@ -32,6 +32,7 @@
 //! on-air milestone.
 
 use mfsk_core::engine::dsp::downsample::{build_fft_cache, downsample_cached};
+use mfsk_core::engine::dsp::subtract::{GfskParams, SubtractCfg, refine_freq, subtract_tones_lpf};
 use mfsk_core::engine::llr::{compute_llr, symbol_spectra, sync_quality};
 use mfsk_core::engine::protocol::FecOpts;
 use mfsk_core::engine::sync::{AudioSource, RxGrid, SyncCandidate, coarse_sync, refine_candidate};
@@ -177,43 +178,109 @@ pub enum Js8Depth {
     BpOsd,
 }
 
+/// Rounds of successive interference cancellation.
+///
+/// JS8Call inherits FT8's subtract loop, so a weak frame inside a stronger
+/// neighbour's ~50 Hz occupied bandwidth is decoded there and not here unless
+/// we do the same. Two rounds, matching FT8's calibrations.
+const SIC_ROUNDS: usize = 2;
+
+/// Per-round coarse-sync floor multiplier: a later round looks deeper into
+/// the noise on a residual the strong frames have been removed from.
+const SIC_SYNC_FACTORS: [f32; 3] = [1.0, 0.75, 0.5];
+
+/// `subtractft8.f90`'s `NFILT=4000`. JS8Call inherits FT8's subtract, so the
+/// same tracking filter applies at every speed.
+const SIC_LPF_HALF: usize = 2000;
+
+/// Grid-search radius for the subtract's carrier refine, in Hz. JS8's coarse
+/// sync reports carriers on ~2.9 Hz FFT bins, so the true carrier can sit a
+/// couple of hertz off a decode's reported frequency.
+const SIC_REFINE_RADIUS_HZ: f32 = 5.0;
+
+/// The subtract model for this speed — GFSK shaping exactly as
+/// [`crate::js8::modem::synth_gfsk`] generates it.
+fn subtract_cfg<P: Js8Proto>() -> SubtractCfg {
+    let nsps = <P as ModulationParams>::NSPS as usize;
+    SubtractCfg {
+        sample_rate: 12_000.0,
+        tone_spacing_hz: <P as ModulationParams>::TONE_SPACING_HZ,
+        samples_per_symbol: nsps,
+        base_offset_s: <P as FrameLayout>::TX_START_OFFSET_S,
+        gfsk: Some(GfskParams {
+            bt: <P as ModulationParams>::GFSK_BT,
+            hmod: <P as ModulationParams>::GFSK_HMOD,
+            ramp_samples: nsps / 8,
+        }),
+    }
+}
+
 /// Decode every JS8 frame in one slot of 12 kHz audio.
 ///
 /// `audio` should start at the slot boundary; the frame is expected
 /// `TX_START_OFFSET_S` into it, and anything from roughly ±2.5 s either side of
 /// that is still found.
+///
+/// Multi-pass: decode, subtract each accepted frame from the residual, and
+/// search again — see [`SIC_ROUNDS`]. A single pass reports only the strongest
+/// frame at each audio offset.
 pub fn decode_slot<P: Js8Proto>(audio: &[i16], depth: Js8Depth) -> Vec<Js8Decode> {
     let window = (f64::from(<P as FrameLayout>::T_SLOT_S) * DECODE_RATE) as usize;
     if audio.len() < window / 2 {
         return Vec::new();
     }
 
-    let candidates = coarse_sync::<P>(
-        AudioSource::Real(audio),
-        AUDIO_MIN_HZ,
-        AUDIO_MAX_HZ,
-        SYNC_MIN,
-        None,
-        MAX_CAND,
-        RxGrid::real(DECODE_RATE as f32),
-    );
-    if candidates.is_empty() {
-        return Vec::new();
-    }
-
-    let cfg = P::DOWNSAMPLE;
-    let fft_cache = build_fft_cache(audio, &cfg);
-
+    let mut residual = audio.to_vec();
     let mut out: Vec<Js8Decode> = Vec::new();
-    for cand in &candidates {
-        // Skip a candidate that sits on top of something already decoded —
-        // coarse sync happily reports the same signal several times.
-        if out.iter().any(|d| (d.audio_hz - cand.freq_hz).abs() < P::DEDUPE_HZ) {
+
+    for &factor in SIC_SYNC_FACTORS.iter().take(SIC_ROUNDS) {
+        let candidates = coarse_sync::<P>(
+            AudioSource::Real(&residual),
+            AUDIO_MIN_HZ,
+            AUDIO_MAX_HZ,
+            SYNC_MIN * factor,
+            None,
+            MAX_CAND,
+            RxGrid::real(DECODE_RATE as f32),
+        );
+        if candidates.is_empty() {
             continue;
         }
-        if let Some(d) = process_candidate::<P>(cand, &fft_cache, depth) {
-            out.push(d);
+        let fft_cache = build_fft_cache(&residual, &P::DOWNSAMPLE);
+
+        let mut fresh: Vec<Js8Decode> = Vec::new();
+        for cand in &candidates {
+            // Within a round, coarse sync reports one signal several times, so
+            // a candidate already nearest a fresh decode is that same signal.
+            if fresh.iter().any(|k| (k.audio_hz - cand.freq_hz).abs() < P::DEDUPE_HZ) {
+                continue;
+            }
+            let Some(d) = process_candidate::<P>(cand, &fft_cache, depth) else { continue };
+            // Across rounds, dedup on the payload and not on frequency: a later
+            // round sees the residual of a frame already decoded, but two
+            // stations can share a frequency, and that co-channel case is
+            // exactly what subtraction recovers.
+            if out.iter().any(|k| k.payload == d.payload) {
+                continue;
+            }
+            fresh.push(d);
         }
+
+        let cfg = subtract_cfg::<P>();
+        for d in &fresh {
+            let tones = crate::js8::modem::frame_tones::<P>(d.payload);
+            let refined = refine_freq(
+                &residual,
+                &tones,
+                d.audio_hz,
+                d.dt_sec,
+                &cfg,
+                SIC_REFINE_RADIUS_HZ,
+                0.1,
+            );
+            subtract_tones_lpf(&mut residual, &tones, refined, d.dt_sec, &cfg, SIC_LPF_HALF, true);
+        }
+        out.extend(fresh);
     }
 
     out.sort_by(|a, b| a.audio_hz.total_cmp(&b.audio_hz));
@@ -449,6 +516,37 @@ mod tests {
             assert_eq!(got.len(), 1, "noise {noise}: {got:?}");
             assert_eq!(got[0].payload.to_chars(), "KM4ACKtestin");
         }
+    }
+
+    /// A weak JS8 frame buried under a strong one at the same audio offset
+    /// must still decode. This is what the SIC rounds exist for: the strong
+    /// frame's ~50 Hz occupied bandwidth covers the weak one, and only
+    /// subtraction of the strong decode exposes it in the residual. Without
+    /// the rounds, single-pass reports the strong frame alone — and JS8Call,
+    /// which inherits FT8's subtract loop, would have shown both.
+    #[test]
+    fn a_masked_frame_is_recovered_by_subtraction() {
+        let speed = Js8Speed::Normal;
+        let strong = Js8Payload::from_chars("KM4ACKtestin", 4).expect("packs");
+        let weak = Js8Payload::from_chars("HELLOWORLD12", 3).expect("packs");
+        let st = modem::synth_gfsk_for(speed, &modem::frame_tones_for(speed, strong), 1500.0, 0.5);
+        let wk = modem::synth_gfsk_for(speed, &modem::frame_tones_for(speed, weak), 1500.0, 0.1);
+        let n = slot_samples(speed);
+        let start = modem::start_offset_samples(speed);
+        let mut audio = vec![0.0f32; n.max(st.len() * 2)];
+        for frame in [&st, &wk] {
+            for (i, &s) in frame.iter().enumerate() {
+                if start + i < audio.len() {
+                    audio[start + i] += s;
+                }
+            }
+        }
+        let pcm: Vec<i16> =
+            audio.iter().take(n).map(|&s| (s.clamp(-1.0, 1.0) * 28_000.0) as i16).collect();
+        let got = decode_slot_for(speed, &pcm, Js8Depth::BpOsd);
+        let texts: Vec<String> = got.iter().map(|d| d.payload.to_chars()).collect();
+        assert!(texts.iter().any(|t| t == "KM4ACKtestin"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "HELLOWORLD12"), "weak frame lost: {texts:?}");
     }
 
     #[test]
