@@ -663,4 +663,41 @@ mod tests {
         let _ = decode_ping(&audio[..audio.len() / 2]);
         let _ = fsk441_find_pings(&audio);
     }
+
+    /// The real thing: an off-air FSK441 recording decodes to the callsign it
+    /// carries.
+    ///
+    /// Point `SDROXIDE_FSK441_SAMPLE` at a mono 11 025 Hz WAV — convert a
+    /// capture with `ffmpeg -i capture.mp3 -ac 1 -ar 11025 burst.wav`. The
+    /// sample is off-air material and cannot live in the tree, so the test is
+    /// `#[ignore]`d and skips when the variable is unset. Run it with
+    /// `cargo test -p sdroxide-dsp --release -- --ignored --nocapture`.
+    ///
+    /// The Sigidwiki *FSK441Burst* sample decodes to `YO2NAA` and its `RRR`
+    /// rogers, which is the check this test was written for.
+    #[test]
+    #[ignore]
+    fn an_off_air_burst_decodes() {
+        let Ok(path) = std::env::var("SDROXIDE_FSK441_SAMPLE") else {
+            eprintln!("SDROXIDE_FSK441_SAMPLE unset; skipping");
+            return;
+        };
+        let mut reader = hound::WavReader::open(&path).expect("open the sample WAV");
+        let spec = reader.spec();
+        assert_eq!(spec.sample_rate, FSK441_RATE as u32, "the sample must be at 11 025 Hz");
+        assert_eq!(spec.channels, 1, "the sample must be mono");
+        let audio: Vec<f32> = match spec.sample_format {
+            hound::SampleFormat::Float => {
+                reader.samples::<f32>().map(|s| s.expect("sample")).collect()
+            }
+            hound::SampleFormat::Int => {
+                reader.samples::<i16>().map(|s| s.expect("sample") as f32 / 32_768.0).collect()
+            }
+        };
+        let pings = fsk441_find_pings(&audio);
+        assert!(
+            pings.iter().any(|p| p.text.contains("YO2NAA")),
+            "the off-air sample did not decode: {pings:?}"
+        );
+    }
 }
