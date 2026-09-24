@@ -296,6 +296,20 @@ pub enum Mode {
     /// none of WSPR's duty-cycle or band-hopping machinery. Appended for the
     /// same reason as [`Mode::Hell`].
     Pi4,
+    /// FSK441 — the original high-speed meteor-scatter mode, MSK144's older
+    /// sibling: 4-FSK at 441 baud on four tones 441 Hz apart (882/1323/1764/
+    /// 2205 Hz), carrying the 43-character PUA-43 alphabet plus the single-tone
+    /// `R26`/`R27`/`RRR`/`73` shorthand, in a 30-second T/R period (15 seconds
+    /// also used).
+    ///
+    /// Not a frame at a fixed offset: an operator transmits the message
+    /// repeatedly through the whole period and the decoder hunts the slot for
+    /// the short ionised-trail bursts a meteor leaves, so a decode carries the
+    /// time *into* the slot it was found at. The period is an operator setting
+    /// ([`crate::Fsk441Period`]), not part of the mode, so [`Mode::slot_timing`]
+    /// answers `None` and the clock comes from the chosen period. Receive only
+    /// in this build. Appended for the same reason as [`Mode::Hell`].
+    Fsk441,
 }
 
 /// The bands on which a mode that keeps phone practice rides the lower
@@ -316,7 +330,7 @@ const PHONE_LSB_BANDS: [(f64, f64); 3] =
 impl Mode {
     /// Every mode, in the order they cycle and appear in the picker — which is
     /// deliberately *not* the enum's declaration order (see [`Mode::Hell`]).
-    pub const ALL: [Mode; 43] = [
+    pub const ALL: [Mode; 44] = [
         Mode::Lsb,
         Mode::Usb,
         Mode::Cw,
@@ -360,6 +374,7 @@ impl Mode {
         Mode::RfPaint,
         Mode::Rade,
         Mode::Hfdl,
+        Mode::Fsk441,
     ];
 
     /// The digital modes handled by a dedicated decode/encode engine (the
@@ -367,7 +382,7 @@ impl Mode {
     /// packet, RF Paint). All are USB underneath except RIFP, VHF packet and
     /// VHF SSTV, which frequency-modulate the carrier, and ACARS, which is
     /// received in AM.
-    pub const DIGITAL: [Mode; 25] = [
+    pub const DIGITAL: [Mode; 26] = [
         Mode::Ft8,
         Mode::Ft4,
         Mode::Ft2,
@@ -393,6 +408,7 @@ impl Mode {
         Mode::Packet,
         Mode::PacketHf,
         Mode::Aprs,
+        Mode::Fsk441,
     ];
 
     /// True for modes that use a dedicated decode/QSO layer over USB.
@@ -424,6 +440,7 @@ impl Mode {
                 | Mode::Packet
                 | Mode::PacketHf
                 | Mode::Aprs
+                | Mode::Fsk441
         )
     }
 
@@ -595,7 +612,7 @@ impl Mode {
     /// Including it would buy an overlay that is always empty and a transmit
     /// frequency picker for a mode whose tone offset does not move.
     pub fn is_slotted(self) -> bool {
-        matches!(self, Mode::Ft8 | Mode::Ft4 | Mode::Ft2 | Mode::Js8)
+        matches!(self, Mode::Ft8 | Mode::Ft4 | Mode::Ft2 | Mode::Js8 | Mode::Fsk441)
     }
 
     /// How much spectrum this mode's signal occupies, in Hz, for the modes whose
@@ -743,6 +760,7 @@ impl Mode {
                 // A decoder for a beacon network's signal, not a beacon
                 // implementation — see `Mode::Pi4`'s own doc comment.
                 | Mode::Pi4
+                | Mode::Fsk441
         )
     }
 
@@ -820,6 +838,7 @@ impl Mode {
             Mode::Ais => "AIS",
             Mode::Hfdl => "HFDL",
             Mode::AtChat => "ATCHAT",
+            Mode::Fsk441 => "FSK441",
         }
     }
 
@@ -877,6 +896,7 @@ impl Mode {
                 | Mode::PacketHf
                 | Mode::Navtex
                 | Mode::Wefax
+                | Mode::Fsk441
         );
         crate::ModeProfile {
             agc: Some(if weak_digi { AgcMode::Slow } else { AgcMode::Med }),
@@ -956,7 +976,8 @@ impl Mode {
             | Mode::Thor
             | Mode::Fsq
             | Mode::Hell
-            | Mode::RfPaint => (100.0, 3300.0),
+            | Mode::RfPaint
+            | Mode::Fsk441 => (100.0, 3300.0),
             // The fax subcarrier is 1900 Hz ± 400; the wider passband leaves
             // room for a receiver tuned a few hundred hertz off, which is the
             // normal state of affairs on a chart found by ear.
@@ -1196,7 +1217,8 @@ impl Mode {
             | Mode::Rade
             | Mode::Packet
             | Mode::PacketHf
-            | Mode::Aprs => C::Data,
+            | Mode::Aprs
+            | Mode::Fsk441 => C::Data,
         }
     }
 
@@ -1430,7 +1452,8 @@ impl Mode {
             | Mode::Acars
             | Mode::PacketHf
             | Mode::Rade
-            | Mode::HdRadio => &[],
+            | Mode::HdRadio
+            | Mode::Fsk441 => &[],
         }
     }
 }
@@ -1968,6 +1991,8 @@ mod tests {
             (Mode::HdRadio, 39),
             (Mode::Acars, 40),
             (Mode::Hfdl, 41),
+            (Mode::Pi4, 42),
+            (Mode::Fsk441, 43),
         ];
         for (mode, index) in pinned {
             assert_eq!(mode as u8, index, "{} moved", mode.label());
@@ -2014,7 +2039,7 @@ mod tests {
         // dropped and nothing listed twice.
         // The last variant *by discriminant*, which is the one appended most
         // recently — not the one that reads last in the picker.
-        let last = Mode::Pi4 as u8;
+        let last = Mode::Fsk441 as u8;
         for i in 0..=last {
             let present = Mode::ALL.iter().filter(|m| **m as u8 == i).count();
             assert_eq!(present, 1, "discriminant {i} appears {present} times in Mode::ALL");

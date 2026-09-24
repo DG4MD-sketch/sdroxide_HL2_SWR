@@ -18,11 +18,12 @@ or connects to a remote sdroxide server.
 2. [Basic operation](#2-basic-operation)
     - [2.20 HD Radio (NRSC-5)](#220-hd-radio-nrsc-5)
     - [2.22 QO-100 beacon plugin](#222-qo-100-beacon-plugin)
-3. [Digital modes (FT8, FT4, FT2, PSK31, RTTY, Olivia, THOR, FSQ, Hellschreiber, SSTV, RIFP, weather fax, JS8, RF Paint, WSPR, PI4, packet, APRS, ADS-B, NAVTEX, ACARS, VDL2, AIS, HFDL, AtCHAT NET)](#3-digital-modes)
+3. [Digital modes (FT8, FT4, FT2, PSK31, RTTY, Olivia, THOR, FSQ, Hellschreiber, SSTV, RIFP, weather fax, JS8, RF Paint, WSPR, PI4, FSK441, packet, APRS, ADS-B, NAVTEX, ACARS, VDL2, AIS, HFDL, AtCHAT NET)](#3-digital-modes)
     - [3.17 AtCHAT NET](#317-atchat-net)
     - [3.18 ACARS](#318-acars-airline-datalink-on-airband)
     - [3.19 HFDL](#319-hfdl-aircraft-on-shortwave)
     - [3.20 PI4](#320-pi4-next-generation-beacon)
+    - [3.21 FSK441](#321-fsk441)
 4. [Skimmers (CW, PSK, RTTY)](#4-skimmers)
 5. [ISM band decoder (315 / 345 / 433 / 868 / 915 MHz devices)](#5-ism-band-decoder)
 6. [Settings](#6-settings)
@@ -5803,6 +5804,38 @@ Generation Beacon" transmission — there are beacons on 6 m through 23 cm and
 higher. Receive only: there is no transmit half of this panel, and there
 never will be — this decoder exists to listen to the network, not to join
 it.
+
+### 3.21 FSK441
+
+Choose **FSK441** from the DIGITAL row. FSK441 is the **original
+meteor-scatter mode** — MSK144's older sibling — and it works the same way: the
+signal bounces off the brief ionised trail a meteor leaves about 100 km up,
+which lasts from a few milliseconds to a few hundred. It is the classic way to
+work 6 m and 2 m "meteor scatter", and it carries plain text rather than the
+77-bit message the newer modes use.
+
+**Where it is.** 6 m and 2 m, on the meteor-scatter calling frequencies — for
+example **50.260 MHz** on 6 m and **144.200 MHz** on 2 m. The four tones sit
+882–2205 Hz above the dial; leave the audio cursor alone, because the decoder
+searches the whole passband.
+
+**What you see.** A **DECODES** list. The **DT** is not an offset from a frame
+start — FSK441 has no fixed frame position — but **how far into the period**
+the meteor burst was found, so a row at 6.4 s is a ping that arrived 6.4
+seconds after the period began. The message is free text: a callsign pair and
+a report or grid (`W1ABC W9XYZ FN42`), or one of the **single-tone shorthand**
+messages `R26`, `R27`, `RRR` and `73`, which are sent as a pure carrier and
+are far easier to catch than text.
+
+**The period is the setting.** FSK441 runs on a T/R period of **15 or 30
+seconds** — 30 is the band convention — and the chip row picks it. An operator
+transmits the message over and over through the whole period, so whenever a
+meteor trail appears it catches part of one. The decoder scans the whole
+period for those captures; there is no slot-aligned decode the way FT8 has,
+and a whole period may pass with nothing.
+
+**Receive only.** Transmit is not wired in this build. What the panel does is
+copy the pings that arrive.
 
 ## 4. Skimmers
 
@@ -15785,6 +15818,7 @@ using. Bind them under **Speech** on the Controls tab:
 | JS8 | JS8 — conversational messaging on FT8's waveform. Four speeds (Normal 15 s / Fast 10 s / Turbo 6 s / Slow 30 s); directed queries, heartbeats and multi-frame free text. |
 | WSPR | Weak Signal Propagation Reporter — a two-minute beacon carrying a callsign, grid and power. Not a QSO mode: it measures paths, uploads them to WSPRnet, and feeds the propagation heat map. See [3.11](#311-wspr-weak-signal-propagation-reporter). |
 | PI4 | "Next Generation Beacon" — a one-minute four-tone FSK beacon carrying a callsign. Receive only. Not a QSO mode: it measures paths, and carries no grid to feed the propagation heat map with. See [3.20](#320-pi4-next-generation-beacon). |
+| FSK441 | The original meteor-scatter mode on 6 m and 2 m: 4-FSK at 441 baud carrying free text and the `R26`/`R27`/`RRR`/`73` single-tone shorthand, in a 15/30-second period. The decoder hunts the period for meteor-trail pings. Receive only. See [3.21](#321-fsk441). |
 | PSK | PSK31 keyboard mode (BPSK31 / varicode). |
 | RTTY | RTTY keyboard mode (Baudot; selectable shift and baud), on a sideband. |
 | RTTY-FM | The same modem on an FM carrier, the way a club bulletin is still sent on VHF. |

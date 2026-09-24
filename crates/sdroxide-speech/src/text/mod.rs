@@ -167,6 +167,7 @@ impl<'a> Speaker<'a> {
             Mode::Ais => "A I S",
             // Spelt out for the same reason every other initialism here is.
             Mode::Hfdl => "H F D L",
+            Mode::Fsk441 => "F S K four forty one",
             Mode::AtChat => "at chat",
         }
     }

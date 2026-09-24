@@ -15,6 +15,7 @@ mod eq;
 mod fec;
 mod fir;
 mod frame48;
+pub mod fsk441;
 mod fsq;
 mod fsq_image;
 pub mod g3ruh;
@@ -70,6 +71,11 @@ pub use diversity::{Diversity, DiversityMode};
 pub use eq::ParametricEq;
 pub use fec::{ConvCode, viterbi_soft};
 pub use fir::{ComplexFir, RealFir, bandpass_taps};
+pub use fsk441::{
+    DEFAULT_DFTOL as FSK441_DFTOL, FSK441_BAUD, FSK441_CHARSET, FSK441_NSPD, FSK441_RATE,
+    FSK441_SHORTHAND, FSK441_TONES, Fsk441Ping, fsk441_char_to_dits, fsk441_dits_to_char,
+    fsk441_encode_tones, fsk441_find_pings, fsk441_generate_audio,
+};
 pub use fsq::{FsqRx, FsqTx};
 pub use fsq_image::{FsqImageRx, FsqImageTx, IMG_H as FSQ_IMG_H, IMG_W as FSQ_IMG_W};
 pub use g3ruh::{G3RUH_TX_PEAK, G3ruhRx, G3ruhTx, Scrambler};

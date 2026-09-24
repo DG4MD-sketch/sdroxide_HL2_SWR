@@ -2125,6 +2125,11 @@ pub struct DigiConfig {
     /// as soon as the queue drains (subject to the straight key's hold).
     #[serde(default = "cw_default_tx_idle_s")]
     pub cw_tx_idle_s: f32,
+    /// FSK441: the T/R period (15/30 s). A property of the contact rather than
+    /// of the mode — both periods share one waveform and one alphabet — so it
+    /// is a setting here. See [`crate::Fsk441Period`].
+    #[serde(default)]
+    pub fsk441_period: crate::Fsk441Period,
 }
 
 fn cw_default_tx_idle_s() -> f32 {
@@ -2313,6 +2318,7 @@ impl Default for DigiConfig {
             sstv_style: SstvStyle::default(),
             cw_sidetone: true,
             cw_tx_idle_s: 5.0,
+            fsk441_period: crate::Fsk441Period::P30,
         }
     }
 }

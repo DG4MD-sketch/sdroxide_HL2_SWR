@@ -71,7 +71,9 @@ One binary, three ways to run it:
   **WSPR** (transmit and receive, with WSPRnet reporting and optional band
   hopping), receive-only **PI4** (the "Next Generation Beacon" propagation
   mode — 4-FSK, decoded from a rate-1/2 K=32 Fano search across every beacon
-  variant and tone frequency the network uses),
+  variant and tone frequency the network uses), receive-only **FSK441** (the
+  original meteor-scatter mode — 4-FSK at 441 baud, decoding the brief pings a
+  meteor trail reflects in a 15/30-second period),
   **Hellschreiber** (all seven Feld Hell / FSK Hell variants, on a scrolling
   raster), image **SSTV** (Scottie, Martin, Robot), image **RIFP**
   (draft-dulaunoy-rifp-00 — packetised, checksummed pictures over a 4800-baud
@@ -1560,7 +1562,7 @@ way.
 | `--freq <HZ>` | Center frequency in Hz (default: where the last session was left; `14200000` on a first run). |
 | `--rate <HZ>` | Sample rate in Hz (default: from config). |
 | `--gain <DB>` | Overall RX gain in dB (default: hardware AGC / moderate). |
-| `--mode <MODE>` | Initial mode, case-insensitive: `LSB USB CW AM SAM NFM WFM DRM ADS-B VDL2 AIS DIGU DIGL DSB ISB SPEC FT8 FT4 FT2 JS8 WSPR PI4 PSK RTTY RTTY-FM PACKET PACKET-HF APRS SSTV SSTV-FM RIFP WEFAX NAVTEX ACARS OLIVIA THOR FSQ ATCHAT HELL RFPAINT RADE HFDL`, and `"HD RADIO"` (the one name with a space in it, so it needs the quotes). Default: the mode the last session was left in. |
+| `--mode <MODE>` | Initial mode, case-insensitive: `LSB USB CW AM SAM NFM WFM DRM ADS-B VDL2 AIS DIGU DIGL DSB ISB SPEC FT8 FT4 FT2 JS8 WSPR PI4 FSK441 PSK RTTY RTTY-FM PACKET PACKET-HF APRS SSTV SSTV-FM RIFP WEFAX NAVTEX ACARS OLIVIA THOR FSQ ATCHAT HELL RFPAINT RADE HFDL`, and `"HD RADIO"` (the one name with a space in it, so it needs the quotes). Default: the mode the last session was left in. |
 | `--antenna <NAME>` | RX antenna port, as the device names it (`LNAH`, `TX/RX`; see `--probe`). Default: the port the last session was left on. |
 | `--tx-antenna <NAME>` | TX antenna port, likewise (`BAND1`, `BAND2`). |
 | `--server` | Run as a server: HTTP web client + WebSocket streaming backend. |
