@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, UdpSocket};
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -662,6 +662,8 @@ pub(crate) struct ThreadCtx {
     /// [`HpsdrRx::pa_temp_c`]. [`TEMP_UNKNOWN`] until the board reports one —
     /// which most of them never do.
     pub temp_centi_c: Arc<AtomicI32>,
+    pub fwd_power_raw: Arc<AtomicU16>,
+    pub rev_power_raw: Arc<AtomicU16>,
     pub tx: Consumer<f32>,
     pub ctrl: Receiver<Ctrl>,
 }
@@ -674,6 +676,9 @@ pub(crate) struct ThreadCtx {
 /// has to be told apart from one that is genuinely 0 °C — a Hermes-Lite in a
 /// cold shack in February reads exactly that.
 pub const TEMP_UNKNOWN: i32 = i32::MIN;
+
+/// Sentinel for HL2 forward/reverse ADC readings before the first report.
+pub const POWER_UNKNOWN: u16 = u16::MAX;
 
 /// What every stream of one connection shares. Dropping the last handle stops
 /// the stream and shuts the network thread down.
@@ -714,6 +719,8 @@ struct DevInner {
     /// The board's own temperature, hundredths of a degree — see
     /// [`TEMP_UNKNOWN`].
     temp_centi_c: Arc<AtomicI32>,
+    fwd_power_raw: Arc<AtomicU16>,
+    rev_power_raw: Arc<AtomicU16>,
     /// The TX ring's feed end, claimable exactly once — by DDC 0's stream.
     tx_endpoint: Mutex<Option<Producer<f32>>>,
     /// Which DDCs have a live [`HpsdrRx`], so one cannot be vended twice: two
@@ -864,6 +871,8 @@ impl HpsdrBoard {
         let conn_id = claim_connection(IpAddr::V4(ip));
         let radio_ptt = Arc::new(AtomicBool::new(false));
         let temp_centi_c = Arc::new(AtomicI32::new(TEMP_UNKNOWN));
+        let fwd_power_raw = Arc::new(AtomicU16::new(POWER_UNKNOWN));
+        let rev_power_raw = Arc::new(AtomicU16::new(POWER_UNKNOWN));
         let lna_gain_centi_db = Arc::new(AtomicI32::new((lna_gain_db * 100.0) as i32));
         let adc_overload = Arc::new(AtomicBool::new(false));
         if auto_gain.enabled && board_has_lna_gain(&board) {
@@ -894,6 +903,8 @@ impl HpsdrBoard {
             adc_overload: Arc::clone(&adc_overload),
             radio_ptt: Arc::clone(&radio_ptt),
             temp_centi_c: Arc::clone(&temp_centi_c),
+            fwd_power_raw: Arc::clone(&fwd_power_raw),
+            rev_power_raw: Arc::clone(&rev_power_raw),
             tx: tx_cons,
             ctrl: ctrl_rx,
         };
@@ -929,6 +940,8 @@ impl HpsdrBoard {
                 transmitting: Arc::new(AtomicBool::new(false)),
                 radio_ptt,
                 temp_centi_c,
+                fwd_power_raw,
+                rev_power_raw,
                 tx_endpoint: Mutex::new(Some(tx_prod)),
                 attached: Mutex::new(std::collections::HashSet::new()),
             }),
@@ -1107,6 +1120,32 @@ impl HpsdrRx {
     /// See [`HpsdrBoard::tx_rate_hz`].
     pub fn tx_rate_hz(&self) -> f64 {
         self.dev.tx_rate_hz
+    }
+
+    /// Hermes-Lite 2 SWR from Protocol-1 forward/reverse detector readings.
+    pub fn swr(&self) -> Option<f32> {
+        if self.dev.protocol != 1 || !board_is_hermes_lite(&self.dev.board) {
+            return None;
+        }
+
+        let mut fwd = self.dev.fwd_power_raw.load(Ordering::Relaxed);
+        let mut rev = self.dev.rev_power_raw.load(Ordering::Relaxed);
+
+        if fwd == POWER_UNKNOWN || rev == POWER_UNKNOWN {
+            return None;
+        }
+        if rev > fwd {
+            std::mem::swap(&mut fwd, &mut rev);
+        }
+        if fwd <= 6 {
+            return None;
+        }
+
+        let gamma = rev as f32 / fwd as f32;
+        if gamma >= 1.0 {
+            return None;
+        }
+        Some((1.0 + gamma) / (1.0 - gamma))
     }
 
     pub fn board(&self) -> &str {
