@@ -1294,6 +1294,32 @@ mod tests {
         );
     }
 
+    /// Noise alone must not decode, now that the wide-band pass subtracts:
+    /// mfsk-core runs the second round at three quarters of the sync floor
+    /// even when the first found nothing, so a slot of plain noise is searched
+    /// deeper than it used to be and CRC-14 is all that stands between that
+    /// search and an invented callsign. Several deterministic seeds, so a
+    /// marginal floor shows up here rather than on the air.
+    #[test]
+    fn ft4_noise_alone_decodes_nothing() {
+        let n = (7.5 * 12_000.0) as usize;
+        for seed in 1..=8u32 {
+            let mut rng = seed.wrapping_mul(0x9e37_79b9);
+            let buf: Vec<i16> = (0..n)
+                .map(|_| {
+                    rng ^= rng << 13;
+                    rng ^= rng >> 17;
+                    rng ^= rng << 5;
+                    ((rng as i32 as f32 / i32::MAX as f32) * 6_000.0) as i16
+                })
+                .collect();
+            let mut rx = Ft8Modem::new(Mode::Ft4);
+            let got = rx.decode_slot(&buf, 0, &ApHints::default(), 1500.0);
+            let messages: Vec<&str> = got.iter().map(|d| d.message.as_str()).collect();
+            assert!(messages.is_empty(), "seed {seed}: noise decoded as {messages:?}");
+        }
+    }
+
     #[test]
     fn a_priori_hints_name_the_message_we_are_waiting_for() {
         // Our call is the addressee, the DX's the sender: "AB1CD W9XYZ R-13".
