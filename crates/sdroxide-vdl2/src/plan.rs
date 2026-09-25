@@ -41,7 +41,7 @@
 
 use sdroxide_types::{
     VDL2_CHANNEL_LABELS, VDL2_CHANNEL_SPACING_HZ, VDL2_CHANNELS_HZ, VDL2_CSC_HZ,
-    VDL2_PLAN_CENTER_HZ, VDL2_PLAN_RATE_HZ,
+    VDL2_PLAN_CENTER_HZ,
 };
 
 /// One channel of the plan.
@@ -162,9 +162,9 @@ pub fn window_center_for(hw_center_hz: f64, hw_rate_hz: f64, window_rate_hz: f64
 /// panel says how much of the plan it reaches.
 ///
 /// "Holds the plan" is measured with [`channels_in_window`], not against
-/// [`VDL2_PLAN_RATE_HZ`]: that constant is rounded up, and a 466 666.67 Hz
-/// window (1.4 and 2.8 Msps) holds every channel while sitting a third of a
-/// hertz under it.
+/// [`VDL2_PLAN_RATE_HZ`](sdroxide_types::VDL2_PLAN_RATE_HZ): that constant is
+/// rounded up, and a 466 666.67 Hz window (1.4 and 2.8 Msps) holds every
+/// channel while sitting a third of a hertz under it.
 pub fn window_target_rate_for(device_rate_hz: f64) -> f64 {
     let window_for = |target: f64| sdroxide_dsp::Ddc::rate_for(device_rate_hz, target);
     let holds = |rate: f64| channels_in_window(ideal_center_hz(), rate).len() == CHANNELS.len();
@@ -184,6 +184,7 @@ pub fn window_target_rate_for(device_rate_hz: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sdroxide_types::VDL2_PLAN_RATE_HZ;
 
     /// The plan's span and its ideal centre are derived from the table, so
     /// adding a channel moves them rather than leaving them stale.
