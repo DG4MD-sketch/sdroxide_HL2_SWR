@@ -175,6 +175,19 @@ impl SdroxideApp {
         self.prop_heat.texture(ctx, &field, heat_mode, band, u32::MAX).map(|t| t.id())
     }
 
+    /// The grey-line overlay for the flat map, when it is switched on — night
+    /// and twilight from the same Sun the band-conditions table is taken at.
+    /// `None` when the operator has it off; the texture itself is rebuilt at
+    /// most once a minute (see [`crate::prop_map::NightShade`]).
+    pub(in crate::app) fn night_texture(
+        &mut self,
+        ctx: &egui::Context,
+    ) -> Option<eframe::egui::TextureId> {
+        self.view
+            .map_night
+            .then(|| self.night_shade.texture(ctx, crate::time::now_unix()))
+    }
+
     /// The chip row that turns the flat map's propagation heat on and picks
     /// what it shows. Drawn just above the map by every panel that has one.
     pub(in crate::app) fn prop_map_controls(&mut self, ui: &mut egui::Ui) {
@@ -194,6 +207,18 @@ impl SdroxideApp {
                  switched on under Settings → Spots — what the world's skimmers are \
                  hearing, which covers the bands this radio is not on.",
             );
+            // The grey line, independent of the heat — it stays useful with PROP
+            // off, so it sits above the early return.
+            if crate::chrome::chip(ui, self.view.map_night, RichText::new("NIGHT").size(9.5))
+                .on_hover_text(
+                    "Shade where the Sun is down, and the twilight between, so the grey line \
+                     shows on the map. Low bands go long and high bands close on the night side \
+                     of it, and the terminator itself is where the DX is.",
+                )
+                .clicked()
+            {
+                self.view.map_night = !self.view.map_night;
+            }
             if !on {
                 return;
             }

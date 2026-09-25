@@ -1128,6 +1128,7 @@ impl SdroxideApp {
                 })
                 .collect();
             let heat = self.prop_texture(ui.ctx(), self.state.rx_freq_hz());
+            let night = self.night_texture(ui.ctx());
             self.prop_map_controls(ui);
             crate::widgets::worldmap::show(
                 ui,
@@ -1139,6 +1140,7 @@ impl SdroxideApp {
                 &stations,
                 &spot_dots,
                 heat,
+                night,
                 tx_active,
                 map_budget,
             );

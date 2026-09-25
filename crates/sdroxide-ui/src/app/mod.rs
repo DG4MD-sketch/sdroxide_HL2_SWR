@@ -746,6 +746,9 @@ pub struct SdroxideApp {
     show_bands: bool,
     /// The propagation field rendered to pixels, rebuilt only when it moves.
     prop_heat: crate::prop_map::PropHeat,
+    /// The grey-line (night/twilight) overlay rendered to pixels, rebuilt at
+    /// most once a minute.
+    night_shade: crate::prop_map::NightShade,
     /// WSPR receptions, newest first: what this station decoded, and — when the
     /// WSPRnet download is on — who decoded this station. Capped at
     /// [`crate::app::panels::wspr::WSPR_SPOT_ROWS`]; the propagation store keeps
@@ -1476,6 +1479,7 @@ impl SdroxideApp {
             digi_stations: Default::default(),
             prop: Default::default(),
             prop_heat: Default::default(),
+            night_shade: Default::default(),
             wspr_spots: Vec::new(),
             pi4_spots: Vec::new(),
             digi_hover_ll: None,
