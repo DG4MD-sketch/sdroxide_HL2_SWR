@@ -76,6 +76,11 @@ impl SdroxideApp {
             crate::chrome::paint_window_border(ctx, &r.response);
         }
         self.show_bands = open;
+        if self.show_bands {
+            // The IBP beacon and its countdown move every second; keep painting
+            // while the window is open rather than showing a stale slot.
+            crate::repaint::after_ms(ctx, 1000);
+        }
     }
 
     fn bands_body(&mut self, ui: &mut egui::Ui) {
@@ -166,6 +171,7 @@ impl SdroxideApp {
                     }
                 },
             );
+            self.ibp_section(ui);
         });
 
         ui.add_space(6.0);
@@ -175,5 +181,49 @@ impl SdroxideApp {
                  shut, or only that nobody was on it.")
             .italics(),
         );
+    }
+
+    /// The IBP beacon list at the foot of the BANDS window.
+    ///
+    /// The schedule is deterministic — eighteen beacons, five bands, a
+    /// three-minute cycle — so this is a clock and a table rather than a feed.
+    /// A beacon you can hear is a path that is open, measured rather than
+    /// forecast, and the 10 m beacon at 28.200 MHz is the closest amateur-band
+    /// proxy for 11 m conditions there is.
+    fn ibp_section(&self, ui: &mut egui::Ui) {
+        let now = crate::time::now_unix();
+        let home = sdroxide_types::grid_to_latlon(&self.my_grid());
+        let active = sdroxide_types::ibp_active_at(now, home);
+        let dim = |s: &str| RichText::new(s.to_string()).size(9.5).color(dim_ink());
+        ui.add_space(12.0);
+        ui.label(RichText::new("IBP BEACONS").size(10.0).strong().color(crate::theme::CYAN_DIM()));
+        ui.add_space(2.0);
+        ui.label(dim(&format!(
+            "NCDXF/IARU · next beacon in {} s",
+            sdroxide_types::ibp_seconds_left(now)
+        )));
+        ui.add_space(3.0);
+        for a in &active {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(a.band.label).size(10.5).strong());
+                ui.label(RichText::new(format!("{:.3} MHz", a.band.freq_hz / 1e6)).size(10.5));
+                ui.label(RichText::new(a.beacon.callsign).size(11.0).strong());
+                ui.label(dim(a.beacon.location));
+                if let (Some(b), Some(d)) = (a.bearing_deg, a.distance_km) {
+                    ui.label(dim(&format!(
+                        "{} · {:.0} km",
+                        sdroxide_solar::satellites::compass(b),
+                        d
+                    )));
+                }
+            })
+            .response
+            .on_hover_text(format!(
+                "{} at {} — hearing it means the {} path is open. 10m (28.200 MHz) is the \
+                 closest amateur-band proxy for 11 m conditions. Each beacon steps up a band \
+                 every 10 s, so this row changes every slot.",
+                a.beacon.callsign, a.beacon.location, a.band.label
+            ));
+        }
     }
 }
