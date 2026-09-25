@@ -39,6 +39,10 @@ use sdroxide_types::HpsdrOcPlan;
 use sdroxide_types::{HpsdrFilterBoard, hpsdr_alex_oc as alex_oc, hpsdr_n2adr_oc as n2adr_oc};
 
 const PORT: u16 = 1024;
+
+/// Exponential moving-average coefficient for HL2 forward/reverse detector
+/// readings. 0.10 gives strong smoothing while still following real changes.
+const HL2_POWER_EMA_ALPHA: f32 = 0.10;
 /// Samples per 512-byte OZY frame for one receiver (504 data bytes / 8).
 const SAMPLES_PER_FRAME: usize = 63;
 /// Sample-pairs carried by one datagram (two frames).
@@ -554,6 +558,10 @@ pub(crate) fn run(ctx: ThreadCtx) {
 
     let mut out_seq: u32 = 0;
     let mut rot = Rotation::new();
+
+    // Smoothed HL2 detector readings. First sample initializes the filter.
+    let mut fwd_ema: Option<f32> = None;
+    let mut rev_ema: Option<f32> = None;
     // Only a Hermes-Lite has the I2C tunnel this rides on. The board itself is
     // looked for on the bus rather than configured: it either answers or it
     // does not, and an operator should not have to tell us what is plugged in.
@@ -800,10 +808,21 @@ pub(crate) fn run(ctx: ThreadCtx) {
                     }
                     if hermes_lite {
                         if let Some(raw) = info.fwd_power_raw {
-                            fwd_power_raw.store(raw, Ordering::Relaxed);
+                            let next = match fwd_ema {
+                                Some(old) => old + HL2_POWER_EMA_ALPHA * (f32::from(raw) - old),
+                                None => f32::from(raw),
+                            };
+                            fwd_ema = Some(next);
+                            fwd_power_raw.store(next.round() as u16, Ordering::Relaxed);
                         }
+
                         if let Some(raw) = info.rev_power_raw {
-                            rev_power_raw.store(raw, Ordering::Relaxed);
+                            let next = match rev_ema {
+                                Some(old) => old + HL2_POWER_EMA_ALPHA * (f32::from(raw) - old),
+                                None => f32::from(raw),
+                            };
+                            rev_ema = Some(next);
+                            rev_power_raw.store(next.round() as u16, Ordering::Relaxed);
                         }
                     }
                     // An overloaded ADC is the classic "the signal looks weird"

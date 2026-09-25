@@ -680,6 +680,10 @@ pub const TEMP_UNKNOWN: i32 = i32::MIN;
 /// Sentinel for HL2 forward/reverse ADC readings before the first report.
 pub const POWER_UNKNOWN: u16 = u16::MAX;
 
+/// Empirical HL2 coupler calibration determined against an external SWR meter.
+/// Applied to |Gamma| = REV/FWD before converting to SWR.
+const HL2_SWR_GAMMA_CAL: f32 = 1.23;
+
 /// What every stream of one connection shares. Dropping the last handle stops
 /// the stream and shuts the network thread down.
 struct DevInner {
@@ -1110,7 +1114,7 @@ fn hl2_swr_from_raw(mut fwd: u16, mut rev: u16) -> Option<f32> {
     if fwd <= 6 {
         return None;
     }
-    let gamma = rev as f32 / fwd as f32;
+    let gamma = (rev as f32 / fwd as f32) * HL2_SWR_GAMMA_CAL;
     if gamma >= 1.0 {
         return None;
     }
@@ -1687,9 +1691,9 @@ mod hl2_swr_regression_tests {
     use super::hl2_swr_from_raw;
 
     #[test]
-    fn known_hl2_reading_is_about_1_24_to_1() {
+    fn known_hl2_reading_is_about_1_30_to_1() {
         let swr = hl2_swr_from_raw(1803, 192).expect("valid SWR");
-        assert!((swr - 1.24).abs() < 0.01, "SWR was {swr}");
+        assert!((swr - 1.30).abs() < 0.01, "SWR was {swr}");
     }
 
     #[test]
