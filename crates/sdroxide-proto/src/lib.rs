@@ -1452,7 +1452,13 @@ use sdroxide_types::{
 /// `band_table: Vec<RelayBandRow>` on its tail, and `RelayConfig` rides
 /// whole inside `Command::SetRelayConfig`, so a v164 peer reads the extra
 /// bytes as the start of the next field and fails to decode the command.
-pub const PROTO_VERSION: u16 = 165;
+///
+/// v166: MSK144, the meteor-scatter mode. `Mode::Msk144` is appended to that
+/// enum, so no surviving discriminant moves. No new wire type: a decode is an
+/// ordinary `Decode` with the burst's time into the slot as its `dt`, and the
+/// mode is receive-only. `Mode` rides `RadioState`, so a v165 peer handed one
+/// runs off the end of the enum — the same break every appended `Mode` causes.
+pub const PROTO_VERSION: u16 = 166;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]

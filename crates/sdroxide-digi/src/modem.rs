@@ -798,6 +798,44 @@ fn join3(a: &str, b: &str, c: &str) -> String {
     [a, b, c].iter().filter(|t| !t.is_empty()).copied().collect::<Vec<_>>().join(" ")
 }
 
+/// Decode one 15-second MSK144 slot of 12 kHz mono i16 audio.
+///
+/// MSK144 is not a frame at a fixed offset: the operator transmits through the
+/// whole period and the decoder slides a window across the slot looking for
+/// meteor-trail bursts, so it is handed the passband centre and half-width to
+/// search rather than a start time — and each result carries the time *into*
+/// the slot (`.tsec`) the burst was found at, which becomes the [`Decode`]'s
+/// `dt`.
+///
+/// Unlike every other mode here, mfsk-core resolves the message text inside
+/// the decode call, so there are no raw 77 bits for us to unpack: the text is
+/// already a `String` and goes through the same parser an FT8 decode does.
+pub fn decode_msk144_slot(audio_12k: &[i16], slot_utc: i64) -> Vec<Decode> {
+    use mfsk_core::msk144::decode::{Depth, decode_slot};
+    let fc = (AUDIO_MIN_HZ + AUDIO_MAX_HZ) / 2.0;
+    let ntol = (AUDIO_MAX_HZ - AUDIO_MIN_HZ) / 2.0;
+    decode_slot(audio_12k, fc, ntol, Depth::Deep)
+        .into_iter()
+        .map(|r| {
+            let p = parse_message(&r.message, MsgKind::Standard);
+            Decode {
+                slot_utc,
+                snr_db: r.snr_db as i16,
+                dt: r.tsec,
+                audio_hz: r.freq_hz,
+                message: r.message,
+                to: p.to,
+                from: p.from,
+                grid: p.grid,
+                is_cq: p.is_cq,
+                cq_to: p.cq_to,
+                free_text: false,
+                rr73_to: None,
+            }
+        })
+        .collect()
+}
+
 /// Unpack 77 message bits and build a [`Decode`], or `None` if unpacking fails.
 /// `hashes` resolves the `<...>` placeholders of hashed callsigns, and
 /// `eu_hashes` the ones the EU VHF contest layout uses — see [`eu_vhf::Hashes`]
@@ -1070,6 +1108,98 @@ mod tests {
         slot.resize((slot_s * 12_000.0) as usize, 0.0);
         let i16buf: Vec<i16> = slot.iter().map(|&s| (s * 20_000.0) as i16).collect();
         (sent, modem.decode_slot(&i16buf, 0, &ApHints::default(), 1500.0))
+    }
+
+    /// A synthesized MSK144 frame decodes back to its message — the round trip
+    /// the controller makes. The waveform is the reference binary-FSK one
+    /// mfsk-core's own sweep uses (`msk144sim`'s), not our TX path, so a decode
+    /// here is the decoder working and not the modulator agreeing with itself.
+    #[test]
+    fn msk144_frame_round_trips() {
+        use mfsk_core::FecCodec;
+        use mfsk_core::msg::wsjt77::pack77;
+
+        const FS: f32 = 12_000.0;
+        // A single frame, continuous phase, 2000 baud, tone spacing = baud.
+        fn frame_itone(call1: &str, call2: &str, report: &str) -> [u8; 144] {
+            let msg = pack77(call1, call2, report).expect("pack77");
+            let mut info = [0u8; 90];
+            info[..77].copy_from_slice(&msg);
+            let mut bytes = [0u8; 12];
+            for (i, &b) in info[..77].iter().enumerate() {
+                bytes[i / 8] |= (b & 1) << (7 - (i % 8));
+            }
+            let crc = mfsk_core::fec::ldpc_128_90::crc13(&bytes);
+            for i in 0..13 {
+                info[77 + i] = ((crc >> (12 - i)) & 1) as u8;
+            }
+            let mut codeword = [0u8; 128];
+            mfsk_core::fec::Ldpc128_90.encode(&info, &mut codeword);
+            // OQPSK frame -> the tone sequence the reference synth plays,
+            // through the same differential transform mfsk-core's own sweep
+            // uses (`build_i4tone`), so a decode here is not our modulator
+            // agreeing with our demodulator.
+            let bitseq = mfsk_core::engine::dsp::msk::build_bitseq(&codeword);
+            let mut bp = [0i8; 144];
+            for i in 0..144 {
+                bp[i] = 2 * bitseq[i] as i8 - 1;
+            }
+            let mut i4 = [0i8; 144];
+            for i in 1..=72usize {
+                i4[2 * i - 2] = (bp[2 * i - 1] * bp[2 * i - 2] + 1) / 2;
+                i4[2 * i - 1] = -((bp[2 * i - 1] * bp[(2 * i) % 144] - 1) / 2);
+            }
+            let mut t = [0u8; 144];
+            for i in 0..144 {
+                t[i] = (-i4[i] + 1) as u8;
+            }
+            t
+        }
+        fn wave(itone: &[u8; 144], freq: f32) -> Vec<i16> {
+            let twopi = 2.0 * std::f32::consts::PI;
+            let baud = 2000.0f32;
+            let d0 = twopi * (freq - 0.25 * baud) / FS;
+            let d1 = twopi * (freq + 0.25 * baud) / FS;
+            let mut phi = 0.0f32;
+            let mut out = Vec::with_capacity(144 * 6);
+            for &tone in itone {
+                let d = if tone == 0 { d0 } else { d1 };
+                for _ in 0..6 {
+                    out.push((phi.cos() * 12_000.0) as i16);
+                    phi += d;
+                    if phi >= twopi {
+                        phi -= twopi;
+                    }
+                }
+            }
+            out
+        }
+
+        let itone = frame_itone("K1ABC", "W9XYZ", "EN37");
+        // A meteor ping per second through a 15 s slot: the frame plays
+        // continuously but is enveloped by the ionised trail's decay
+        // (`2.718*t*exp(-t)`, the shape mfsk-core's own sweep uses). MSK144's
+        // decoder hunts these bursts, so a bare continuous carrier is not a
+        // signal it is built to find.
+        let one = wave(&itone, 1500.0);
+        let npts = 15 * FS as usize;
+        let mut carrier = Vec::with_capacity(npts);
+        while carrier.len() < npts {
+            carrier.extend_from_slice(&one);
+        }
+        carrier.truncate(npts);
+        let mut slot = Vec::with_capacity(npts);
+        for (i, &s) in carrier.iter().enumerate() {
+            let iping = (i / FS as usize).max(1).min(14);
+            let t = (i as f32 / FS - iping as f32) / 0.2;
+            let env = if (0.0..=10.0).contains(&t) { 2.718 * t * (-t).exp() } else { 0.0 };
+            slot.push((s as f32 * env) as i16);
+        }
+        let decodes = decode_msk144_slot(&slot, 0);
+        assert!(
+            decodes.iter().any(|d| d.message == "K1ABC W9XYZ EN37"),
+            "MSK144 did not round-trip: {decodes:?}"
+        );
     }
 
     #[test]

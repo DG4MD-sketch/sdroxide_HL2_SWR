@@ -742,6 +742,8 @@ impl eframe::App for SdroxideApp {
                                     self.wspr_panel(ui, &mut cmds, panel_h);
                                 } else if mode.is_pi4() {
                                     self.pi4_panel(ui, &mut cmds, panel_h);
+                                } else if mode == Mode::Msk144 {
+                                    self.msk144_panel(ui, &mut cmds);
                                 } else {
                                     self.digi_panel(ui, &mut cmds);
                                 }

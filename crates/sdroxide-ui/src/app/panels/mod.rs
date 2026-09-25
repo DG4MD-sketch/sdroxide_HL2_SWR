@@ -99,6 +99,9 @@ pub(in crate::app) fn panel_panes(mode: Mode) -> &'static [&'static str] {
         Mode::Wefax => &["CHART", "SAVED"],
         Mode::Navtex => &["MESSAGES", "READING"],
         Mode::RfPaint => &["TEXT", "IMAGE"],
+        // The decode list alone: the QSO pane is FT8's sequencer, which a
+        // receive-only MSK144 build has nothing to put in.
+        Mode::Msk144 => &["DECODES"],
         // The keyboard modes and RADE are one column already: receive above,
         // what you are sending below it.
         _ => &["PANEL"],
@@ -1087,6 +1090,19 @@ impl SdroxideApp {
                 String::new()
             }
         ));
+    }
+
+    /// The MSK144 panel: the slot clock and the decode list, and nothing else.
+    ///
+    /// An MSK144 decode is an ordinary [`sdroxide_types::Decode`], so the list
+    /// is the one the FT8 modes share. What is missing is the QSO area — a
+    /// meteor-scatter exchange is a timed handshake this build does not
+    /// sequence (it is receive-only), so the sequencer, the transmit pane and
+    /// the call queue have nothing to drive.
+    pub(in crate::app) fn msk144_panel(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<Command>) {
+        self.slot_progress(ui);
+        ui.add_space(4.0);
+        self.decode_list(ui, cmds);
     }
 }
 
