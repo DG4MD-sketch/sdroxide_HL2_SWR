@@ -199,6 +199,16 @@ impl Ft8Modem {
                 MAX_CAND,
             )
             .osd(true)
+            // Subtraction, so a weak signal inside a stronger neighbour's
+            // occupied bandwidth is still decoded — FT4's whole reason for
+            // multi-pass SIC, and what WSJT-X/WSJT-CB run by default. The
+            // default strategy is single-pass: without this a busy slot
+            // reports only the strongest signal at each audio offset, which
+            // is the "they don't stack" report against WSJT-X. Two rounds are
+            // the measured choice (mfsk-core's FT4 WSJT-X sample: 11/14
+            // without, 14/14 with `.sic_rounds(2)`, nothing more from a
+            // third; 5 ms → 71 ms against a 7.5 s slot).
+            .sic_rounds(2)
             .decode()
             .results
             .into_iter()
@@ -1229,6 +1239,58 @@ mod tests {
             decodes.iter().any(|d| d.message == "CQ AB1CD FN42"),
             "got {:?}",
             decodes.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// A weak FT4 signal buried under a strong one at the same audio offset
+    /// must still decode. This is what multi-pass SIC buys and what the
+    /// single-pass default cannot do: the strong signal's own occupied
+    /// bandwidth (90 Hz) covers the weak one, and only subtraction of the
+    /// strong decode exposes it in the residual. WSJT-X and WSJT-CB subtract
+    /// by default, so without this a busy FT4 slot reports only the strongest
+    /// signal at each offset — the "they don't stack" report.
+    ///
+    /// The two decodes are co-channel on purpose: at any wider separation the
+    /// single-pass default would already find both, and the test would stop
+    /// pinning subtraction at all. Noise is deterministic, so this cannot
+    /// flake between runs.
+    #[test]
+    fn a_masked_ft4_signal_is_recovered_by_subtraction() {
+        let modem = Ft8Modem::new(Mode::Ft4);
+        let strong = "CQ AB1CD FN42";
+        let weak = "CQ EF2GH JO22";
+        let pad = (0.5 * 12_000.0) as usize;
+        let (sb, _) = modem.encode_burst_12k(strong, 1500.0, 0.5).expect("encode strong");
+        let (wb, _) = modem.encode_burst_12k(weak, 1500.0, 0.03).expect("encode weak");
+        let mut slot = vec![0.0f32; (7.5 * 12_000.0) as usize - pad];
+        for (i, &s) in sb.iter().enumerate() {
+            if i < slot.len() {
+                slot[i] += s;
+            }
+        }
+        for (i, &s) in wb.iter().enumerate() {
+            if i < slot.len() {
+                slot[i] += s;
+            }
+        }
+        let mut rng: u32 = 0x9e37_79b9;
+        for s in slot.iter_mut() {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            *s += (rng as i32 as f32 / i32::MAX as f32) * 0.005;
+        }
+        let mut padded = vec![0.0f32; pad];
+        padded.extend_from_slice(&slot);
+        let buf: Vec<i16> = padded.iter().map(|&s| (s * 20_000.0) as i16).collect();
+
+        let mut rx = Ft8Modem::new(Mode::Ft4);
+        let got = rx.decode_slot(&buf, 0, &ApHints::default(), 1500.0);
+        let messages: Vec<&str> = got.iter().map(|d| d.message.as_str()).collect();
+        assert!(messages.contains(&strong), "the strong signal decoded: {messages:?}");
+        assert!(
+            messages.contains(&weak),
+            "the weak signal under it did not survive subtraction: {messages:?}",
         );
     }
 
