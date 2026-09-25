@@ -8,48 +8,56 @@
 //! data.
 //!
 //! Why a listener cares: a beacon you can hear is a path that is open, measured
-//! rather than forecast, and the 10 m beacon at 28.200 MHz is the closest
-//! amateur-band proxy for 11 m conditions there is. The beacon's own site gives
-//! its power, antenna and coordinates, so the same row also answers "which
-//! direction, how far".
+//! rather than forecast. Each beacon's site is known, so the same row also
+//! answers "which direction, how far".
 //!
-//! Coordinates and callsigns are the NCDXF's published list; the slot order and
-//! band offsets are the published schedule, cross-checked against
-//! [OpenHamClock](https://github.com/accius/openhamclock) (MIT).
+//! Callsigns, sites and locators are the NCDXF's published list
+//! (<https://www.ncdxf.org/beacon/beaconlocations.html>); a position is the
+//! centre of the six-character locator, which is as precisely as the NCDXF
+//! states it. The slot order and band offsets are the published schedule,
+//! cross-checked against [OpenHamClock](https://github.com/accius/openhamclock)
+//! (MIT).
 
-use crate::geo::{bearing_deg, distance_km};
+use crate::geo::{bearing_deg, distance_km, grid_to_latlon};
 
 /// One IBP beacon.
 pub struct Beacon {
     pub callsign: &'static str,
+    /// The site, as the NCDXF names it, with the country for context.
     pub location: &'static str,
-    /// WGS-84 latitude, degrees.
-    pub lat: f64,
-    /// WGS-84 longitude, degrees east.
-    pub lon: f64,
+    /// The six-character Maidenhead locator the NCDXF publishes.
+    pub locator: &'static str,
+}
+
+impl Beacon {
+    /// Latitude and longitude, degrees (north and east positive): the centre
+    /// of the published locator.
+    pub fn position(&self) -> (f64, f64) {
+        grid_to_latlon(self.locator).expect("every beacon's locator is a valid six-character one")
+    }
 }
 
 /// The eighteen beacons, in transmission order. The index into this array *is*
 /// the beacon's place in the cycle.
 pub const BEACONS: &[Beacon] = &[
-    Beacon { callsign: "4U1UN", location: "United Nations, NY", lat: 40.749, lon: -73.968 },
-    Beacon { callsign: "VE8AT", location: "Inuvik, Canada", lat: 68.317, lon: -133.533 },
-    Beacon { callsign: "W6WX", location: "Mt. Umunhum, CA", lat: 37.159, lon: -121.929 },
-    Beacon { callsign: "KH6RS", location: "Hawaii, US", lat: 21.441, lon: -157.763 },
-    Beacon { callsign: "ZL6B", location: "Masterton, New Zealand", lat: -40.683, lon: 175.567 },
-    Beacon { callsign: "VK6RBP", location: "Bickley, Australia", lat: -31.802, lon: 116.126 },
-    Beacon { callsign: "JA2IGY", location: "Mt. Asama, Japan", lat: 34.634, lon: 136.873 },
-    Beacon { callsign: "RR9O", location: "Novosibirsk, Russia", lat: 54.853, lon: 83.125 },
-    Beacon { callsign: "VR2B", location: "Hong Kong", lat: 22.255, lon: 114.137 },
-    Beacon { callsign: "4S7B", location: "Colombo, Sri Lanka", lat: 6.816, lon: 79.924 },
-    Beacon { callsign: "ZS6DN", location: "Pretoria, South Africa", lat: -25.683, lon: 28.183 },
-    Beacon { callsign: "5Z4B", location: "Nairobi, Kenya", lat: -1.267, lon: 36.8 },
-    Beacon { callsign: "4X6TU", location: "Tel Aviv, Israel", lat: 32.04, lon: 34.78 },
-    Beacon { callsign: "OH2B", location: "Lohja, Finland", lat: 60.167, lon: 24.667 },
-    Beacon { callsign: "CS3B", location: "Madeira, Portugal", lat: 32.7, lon: -16.883 },
-    Beacon { callsign: "LU4AA", location: "Buenos Aires, Argentina", lat: -34.617, lon: -58.367 },
-    Beacon { callsign: "OA4B", location: "Lima, Peru", lat: -12.043, lon: -77.017 },
-    Beacon { callsign: "YV5B", location: "Caracas, Venezuela", lat: 10.483, lon: -66.983 },
+    Beacon { callsign: "4U1UN", location: "United Nations, New York", locator: "FN30as" },
+    Beacon { callsign: "VE8AT", location: "Inuvik, Canada", locator: "CP38gh" },
+    Beacon { callsign: "W6WX", location: "Mt. Umunhum, California", locator: "CM97bd" },
+    Beacon { callsign: "KH6RS", location: "Maui, Hawaii", locator: "BL10ts" },
+    Beacon { callsign: "ZL6B", location: "Masterton, New Zealand", locator: "RE78tw" },
+    Beacon { callsign: "VK6RBP", location: "Rolystone, Australia", locator: "OF87av" },
+    Beacon { callsign: "JA2IGY", location: "Mt. Asama, Japan", locator: "PM84jk" },
+    Beacon { callsign: "RR9O", location: "Novosibirsk, Russia", locator: "NO14kx" },
+    Beacon { callsign: "VR2B", location: "Hong Kong", locator: "OL72bg" },
+    Beacon { callsign: "4S7B", location: "Colombo, Sri Lanka", locator: "MJ96wv" },
+    Beacon { callsign: "ZS6DN", location: "Pretoria, South Africa", locator: "KG33xi" },
+    Beacon { callsign: "5Z4B", location: "Kikuyu, Kenya", locator: "KI88hr" },
+    Beacon { callsign: "4X6TU", location: "Tel Aviv, Israel", locator: "KM72jb" },
+    Beacon { callsign: "OH2B", location: "Lohja, Finland", locator: "KP20eh" },
+    Beacon { callsign: "CS3B", location: "São Jorge, Madeira", locator: "IM12jt" },
+    Beacon { callsign: "LU4AA", location: "Buenos Aires, Argentina", locator: "GF05tj" },
+    Beacon { callsign: "OA4B", location: "Lima, Peru", locator: "FH17mw" },
+    Beacon { callsign: "YV5B", location: "Caracas, Venezuela", locator: "FK60nd" },
 ];
 
 /// One beacon band and its place in the cycle.
@@ -58,9 +66,10 @@ pub struct IbpBand {
     pub label: &'static str,
     /// The beacon frequency, Hz — what the dial wants.
     pub freq_hz: f64,
-    /// How many slots earlier this band's beacon entered the cycle. A beacon
-    /// steps *up* one band every ten seconds, so the higher bands are showing
-    /// beacons that started earlier: `(18 - step) % 18`.
+    /// Added to the cycle's slot to give this band's beacon. A beacon steps
+    /// *up* one band every ten seconds, so the band `n` steps above 20 m is
+    /// showing the beacon that was on 20 m `n` slots ago, `(slot - n) mod 18` —
+    /// stored as `18 - n` so the sum never goes negative.
     pub offset: usize,
 }
 
@@ -115,9 +124,9 @@ pub fn active_at(unix_s: i64, from: Option<(f64, f64)>) -> Vec<Active> {
             let beacon_index = (slot + band.offset) % BEACONS.len();
             let beacon = &BEACONS[beacon_index];
             let (bearing, distance) = match from {
-                Some((lat, lon)) => (
-                    Some(bearing_deg((lat, lon), (beacon.lat, beacon.lon))),
-                    Some(distance_km((lat, lon), (beacon.lat, beacon.lon))),
+                Some(here) => (
+                    Some(bearing_deg(here, beacon.position())),
+                    Some(distance_km(here, beacon.position())),
                 ),
                 None => (None, None),
             };
@@ -189,14 +198,47 @@ mod tests {
         }
     }
 
-    /// The geometry is from the observer: zero distance to a beacon overhead,
-    /// and the bearing to the north pole is north.
+    /// The geometry is from the observer: no distance to a beacon from its own
+    /// site, and a beacon due north of the observer bears north — and due
+    /// south, south.
     #[test]
     fn the_geometry_is_measured_from_the_observer() {
-        let here = (BEACONS[0].lat, BEACONS[0].lon);
-        let a = active_at(at(0, 0, 0), Some(here));
+        let (lat, lon) = BEACONS[0].position();
+        let a = active_at(at(0, 0, 0), Some((lat, lon)));
         assert!(a[0].distance_km.unwrap() < 1.0, "distance to the beacon itself");
-        let north = active_at(at(0, 0, 0), Some((10.0, 0.0)));
-        let _ = north; // presence is enough; bearing is covered in geo's tests
+
+        let south_of_it = active_at(at(0, 0, 0), Some((lat - 10.0, lon)));
+        let bearing = south_of_it[0].bearing_deg.unwrap();
+        assert!(bearing < 0.5 || bearing > 359.5, "due north read as {bearing}°");
+        let km = south_of_it[0].distance_km.unwrap();
+        assert!((km - 1112.0).abs() < 10.0, "ten degrees of latitude read as {km} km");
+
+        let north_of_it = active_at(at(0, 0, 0), Some((lat + 10.0, lon)));
+        let bearing = north_of_it[0].bearing_deg.unwrap();
+        assert!((bearing - 180.0).abs() < 0.5, "due south read as {bearing}°");
+    }
+
+    /// Every published locator parses, and lands where the site is: a few
+    /// sites checked against where they are on the map, so a transposed letter
+    /// in the table shows up here.
+    #[test]
+    fn the_locators_place_the_beacons_on_their_sites() {
+        for b in BEACONS {
+            let (lat, lon) = b.position();
+            assert!(
+                (-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lon),
+                "{}",
+                b.callsign
+            );
+        }
+        let near = |call: &str, lat: f64, lon: f64| {
+            let b = BEACONS.iter().find(|b| b.callsign == call).unwrap();
+            let km = distance_km(b.position(), (lat, lon));
+            assert!(km < 25.0, "{call} is {km:.0} km from its site");
+        };
+        near("4U1UN", 40.749, -73.968); // the UN building
+        near("KH6RS", 20.8, -156.33); // Maui, not Oahu
+        near("VE8AT", 68.36, -133.72); // Inuvik
+        near("OA4B", -12.05, -77.04); // Lima
     }
 }

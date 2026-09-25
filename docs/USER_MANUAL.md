@@ -2059,6 +2059,17 @@ The document is cached on disk, so the last verdicts are on screen immediately
 at startup and survive being offline. Everywhere they appear they are labelled
 with their age.
 
+**IBP beacons.** At the foot of the window is the NCDXF/IARU International
+Beacon Project: eighteen beacons around the world taking turns on 14.100,
+18.110, 21.150, 24.930 and 28.200 MHz. The schedule is fixed — each beacon
+transmits for 10 seconds, then steps up a band, and the cycle repeats every
+three minutes — so the list is worked out from the clock, not fetched. It
+shows which beacon is on each band right now, where it is, and its bearing and
+distance from your locator, with a countdown to the next change. Tune one of the
+five frequencies and a beacon you hear is a path that is open to that part of
+the world, which is a measurement rather than a forecast. The beacon sites are
+the NCDXF's published list, placed at the centre of each one's locator.
+
 ### 2.16 Satellite operation (SAT)
 
 ![Satellite mode window](images/satellite.jpg)

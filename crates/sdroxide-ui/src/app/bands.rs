@@ -188,8 +188,7 @@ impl SdroxideApp {
     /// The schedule is deterministic — eighteen beacons, five bands, a
     /// three-minute cycle — so this is a clock and a table rather than a feed.
     /// A beacon you can hear is a path that is open, measured rather than
-    /// forecast, and the 10 m beacon at 28.200 MHz is the closest amateur-band
-    /// proxy for 11 m conditions there is.
+    /// forecast.
     fn ibp_section(&self, ui: &mut egui::Ui) {
         let now = crate::time::now_unix();
         let home = sdroxide_types::grid_to_latlon(&self.my_grid());
@@ -219,9 +218,8 @@ impl SdroxideApp {
             })
             .response
             .on_hover_text(format!(
-                "{} at {} — hearing it means the {} path is open. 10m (28.200 MHz) is the \
-                 closest amateur-band proxy for 11 m conditions. Each beacon steps up a band \
-                 every 10 s, so this row changes every slot.",
+                "{} at {} — hearing it means the {} path is open. Each beacon steps up a \
+                 band every 10 s, so this row changes every slot.",
                 a.beacon.callsign, a.beacon.location, a.band.label
             ));
         }
