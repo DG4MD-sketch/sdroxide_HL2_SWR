@@ -1102,6 +1102,21 @@ impl Drop for HpsdrRx {
     }
 }
 
+/// Calculate Hermes-Lite 2 SWR from Protocol-1 detector ADC amplitudes.
+fn hl2_swr_from_raw(mut fwd: u16, mut rev: u16) -> Option<f32> {
+    if rev > fwd {
+        std::mem::swap(&mut fwd, &mut rev);
+    }
+    if fwd <= 6 {
+        return None;
+    }
+    let gamma = rev as f32 / fwd as f32;
+    if gamma >= 1.0 {
+        return None;
+    }
+    Some((1.0 + gamma) / (1.0 - gamma))
+}
+
 impl HpsdrRx {
     /// Which DDC this stream is (0-based, as the wire counts them).
     pub fn ddc(&self) -> u8 {
@@ -1128,24 +1143,14 @@ impl HpsdrRx {
             return None;
         }
 
-        let mut fwd = self.dev.fwd_power_raw.load(Ordering::Relaxed);
-        let mut rev = self.dev.rev_power_raw.load(Ordering::Relaxed);
+        let fwd = self.dev.fwd_power_raw.load(Ordering::Relaxed);
+        let rev = self.dev.rev_power_raw.load(Ordering::Relaxed);
 
         if fwd == POWER_UNKNOWN || rev == POWER_UNKNOWN {
             return None;
         }
-        if rev > fwd {
-            std::mem::swap(&mut fwd, &mut rev);
-        }
-        if fwd <= 6 {
-            return None;
-        }
 
-        let gamma = rev as f32 / fwd as f32;
-        if gamma >= 1.0 {
-            return None;
-        }
-        Some((1.0 + gamma) / (1.0 - gamma))
+        hl2_swr_from_raw(fwd, rev)
     }
 
     pub fn board(&self) -> &str {
@@ -1674,5 +1679,29 @@ mod tests {
         assert_eq!(TX_RATE_HZ_P2, 192_000);
         assert_eq!(tx_rate_for_protocol(1), 48_000);
         assert_eq!(tx_rate_for_protocol(2), 192_000);
+    }
+}
+
+#[cfg(test)]
+mod hl2_swr_regression_tests {
+    use super::hl2_swr_from_raw;
+
+    #[test]
+    fn known_hl2_reading_is_about_1_24_to_1() {
+        let swr = hl2_swr_from_raw(1803, 192).expect("valid SWR");
+        assert!((swr - 1.24).abs() < 0.01, "SWR was {swr}");
+    }
+
+    #[test]
+    fn forward_and_reverse_may_be_swapped() {
+        let a = hl2_swr_from_raw(1803, 192).expect("valid SWR");
+        let b = hl2_swr_from_raw(192, 1803).expect("valid SWR");
+        assert!((a - b).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn no_forward_drive_has_no_meaningful_swr() {
+        assert_eq!(hl2_swr_from_raw(0, 0), None);
+        assert_eq!(hl2_swr_from_raw(6, 0), None);
     }
 }
