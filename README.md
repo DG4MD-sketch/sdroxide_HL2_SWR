@@ -233,6 +233,14 @@ decodes, and the logbook.
   control point per hop.
 - **ALL BANDS** gives every band its own hue, **ONE BAND** runs a
   single band through a blue → green → yellow → red ramp. The same picture can be switched on under the flat map in the operating panel.
+- **NIGHT** shades the night side and the twilight on the flat maps, so the grey
+  line is on the same picture.
+
+The **BANDS** window adds two things worth knowing beside a forecast: the
+NCDXF/IARU **IBP beacon** on each of the five beacon frequencies right now, with
+its bearing and distance, and the **meteor showers** active today with their
+radiants placed for your locator. The aurora panel shows the last day of
+**observed Kp** beside the forecast.
 
 ## PSK31 and RTTY
 
@@ -1646,3 +1654,6 @@ Corresponding Source.** Using sdroxide on your own machine changes nothing. The
 model is confined to the `sdroxide-deepcw` crate, and the wasm web client links
 none of it.
 
+The grey-line shade, the IBP beacon schedule, the meteor-shower calendar and the
+Kp history are adapted from ideas in
+[OpenHamClock](https://github.com/accius/openhamclock) (MIT).
