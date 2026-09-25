@@ -5888,19 +5888,22 @@ arrive.
 ### 3.22 JT65 and JT9
 
 **JT65** and **JT9** are the two classic weak-signal modes from the WSJT
-family: JT65 is the EME (moonbounce) mode, and JT9 is its narrower, slower
-sibling for the weakest signals on HF. Both carry a short message — a
+family: JT65 is the older HF and 6 m weak-signal mode, and JT9 is its
+narrower, slower sibling for HF. Both carry a short message — a
 callsign, another callsign, and a locator or a report — in a **60-second
 slot**, and both are decoded here rather than sequenced, so this build is
 **receive only** for them.
 
 #### Where they are
 
-JT65 and JT9 are HF and low-VHF modes. JT65 is used on 6 m and up for
-moonbounce and on HF for weak-signal work; JT9 is HF. Tune the dial to the
-band and leave the audio cursor where the signals are — a JT signal is tiny,
-16 Hz wide for JT9 and about 180 Hz for JT65, and the panel's decoder searches
-the whole audio passband for it.
+JT65 and JT9 are HF and 6 m modes; WSJT-X's JT65 frequencies sit 2 kHz above
+FT8's (7.076, 14.076 MHz …) and JT9's 4 kHz above (7.078, 14.078 MHz …). This
+build decodes **JT65A**, the HF and 6 m sub-mode: the JT65B and C used for
+moonbounce on 2 m and up are not decoded. A JT signal is tiny — 16 Hz wide for
+JT9 and about 180 Hz for JT65 — and the decoder searches the whole audio
+passband for it, so the audio cursor can stay where it is. The **DT** column is
+measured from the one-second transmit offset, as WSJT-X's is: a station whose
+clock is right reads about 0.
 
 #### What you see
 
@@ -5920,12 +5923,13 @@ up.
 #### No checksum, so a decode is a claim
 
 Unlike FT8 and FT4, the 72-bit JT message carries no CRC — the error
-correction is a Reed–Solomon code (JT65) or a convolutional one (JT9), and
-either can converge on a well-formed message that was never sent when the band
-is empty or the signal is deep in the noise. The decoder orders what it finds
-by the strength of the sync and keeps the strongest few. On a real signal the
-true message is the strong one; on a dead band, do not read a lone weak row as
-a station.
+correction is a Reed–Solomon code (JT65) or a convolutional one (JT9), and in
+principle either can converge on a well-formed message that was never sent.
+What keeps that rare is the decoders themselves: the JT65 Reed–Solomon decode
+is a strict hard-decision one that almost never lands on noise, and JT9 checks
+each candidate's sync and symbol quality and accepts only the standard
+`<to> <from> <grid|report>` message. Every row they return is shown. On a dead
+band, give a lone weak row a second look before logging it.
 
 #### What you need
 

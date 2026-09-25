@@ -364,33 +364,64 @@ impl Ft8Modem {
 /// its 72-bit message has no hashed-callsign layout — and the JT sound card is
 /// the i16 the slotted engine already carries, which mfsk-core wants as f32.
 ///
-/// A JT decode carries **no CRC** (72 bits, no checksum), so a weak or empty
-/// slot can converge on a well-formed-looking message that was never sent. The
-/// decoder's own scan collapses duplicates and orders by sync score, and the
-/// first result is the real one when there is one; the caller keeps only the
-/// strongest few rather than trusting every row.
+/// A JT decode carries **no CRC** (72 bits, no checksum), so what stands
+/// between noise and an invented message is the decoder itself: JT65's
+/// Reed–Solomon decode is hard-decision with no erasures, which almost never
+/// converges on noise, and JT9 gates each candidate on its sync and its soft
+/// symbol quality and accepts only the standard `<to> <from> <grid|report>`
+/// layout. Both scans collapse duplicates. Every row they return is shown.
+///
+/// The scan is centred on the one-second transmit offset both modes use, and
+/// `dt` is reported from there, as WSJT-X's DT column is: an on-time station
+/// reads about 0.
 pub fn decode_jt_slot(audio_12k: &[i16], mode: Mode, slot_utc: i64) -> Vec<Decode> {
     let audio: Vec<f32> = audio_12k.iter().map(|&s| f32::from(s) / 28_000.0).collect();
+    let nominal_s = JT_TX_OFFSET_SAMPLES as f32 / DECODE_RATE_U32 as f32;
     match mode {
-        Mode::Jt65 => mfsk_core::jt65::decode_scan_default(&audio, DECODE_RATE_U32)
-            .into_iter()
-            .filter_map(|r| {
-                let dt = r.dt_sec;
-                jt_decode(r.message, r.snr_db, dt, r.freq_hz, slot_utc)
-            })
-            .collect(),
-        Mode::Jt9 => mfsk_core::jt9::decode_scan_default(&audio, DECODE_RATE_U32)
-            .into_iter()
-            .filter_map(|r| {
-                // JT9 exposes only the start index; the dt is relative to the
-                // slot start, which is where the scan was given the buffer.
-                let dt = r.start_sample as f32 / DECODE_RATE_U32 as f32;
-                jt_decode(r.message, r.snr_db, dt, r.freq_hz, slot_utc)
-            })
-            .collect(),
+        Mode::Jt65 => {
+            let params = mfsk_core::jt65::search::SearchParams {
+                // mfsk-core's default window is 1000–2000 Hz; a JT65 signal
+                // can sit anywhere a receiver passes, and its 65 tones run
+                // ~180 Hz up from the sync tone the search places.
+                freq_min_hz: JT_FREQ_MIN_HZ,
+                freq_max_hz: AUDIO_MAX_HZ - JT65_WIDTH_HZ,
+                // Every candidate costs a full decode attempt; over the whole
+                // passband the default eight would cap a busy slot at eight
+                // stations.
+                max_candidates: 20,
+                ..Default::default()
+            };
+            mfsk_core::jt65::decode_scan(&audio, DECODE_RATE_U32, JT_TX_OFFSET_SAMPLES, &params)
+                .into_iter()
+                .filter_map(|r| {
+                    jt_decode(r.message, r.snr_db, r.dt_sec - nominal_s, r.freq_hz, slot_utc)
+                })
+                .collect()
+        }
+        Mode::Jt9 => mfsk_core::jt9::decode_scan(
+            &audio,
+            DECODE_RATE_U32,
+            JT_TX_OFFSET_SAMPLES,
+            // JT9's default window is already jt9's own 200–4000 Hz.
+            &mfsk_core::jt9::search::SearchParams::default(),
+        )
+        .into_iter()
+        .filter_map(|r| {
+            // JT9 exposes only the start index, from the start of the buffer.
+            let dt = r.start_sample as f32 / DECODE_RATE_U32 as f32 - nominal_s;
+            jt_decode(r.message, r.snr_db, dt, r.freq_hz, slot_utc)
+        })
+        .collect(),
         _ => Vec::new(),
     }
 }
+
+/// JT65 and JT9 key one second into their 60-second slot, as WSJT-X does.
+const JT_TX_OFFSET_SAMPLES: usize = 12_000;
+/// The lowest sync tone the JT65 scan looks for, Hz.
+const JT_FREQ_MIN_HZ: f32 = 200.0;
+/// A JT65A signal's width above its sync tone: 65 tones at 2.69 Hz.
+const JT65_WIDTH_HZ: f32 = 180.0;
 
 /// mfsk-core's JT and Q65 entry points take a `u32` rate; the workspace's is
 /// `f64`.
@@ -1454,20 +1485,20 @@ mod tests {
     }
 
     /// A synthesized JT65 and JT9 message decodes back to the same
-    /// `<to> <from> <grid>` — the round trip the JT controller makes. Both
-    /// modes carry no CRC, so the scan may return extra rows on the noise
-    /// beside the signal; the real message has to be among them, and the
-    /// strongest one has to be it.
+    /// `<to> <from> <grid>` — the round trip the JT controller makes — with the
+    /// DT an on-time station has in WSJT-X's column, about zero. JT65 is also
+    /// placed low in the passband, where mfsk-core's default 1000–2000 Hz
+    /// window would never have looked.
     #[test]
     fn jt_messages_round_trip() {
-        for mode in [Mode::Jt65, Mode::Jt9] {
+        for (mode, hz) in [(Mode::Jt65, 1000.0), (Mode::Jt65, 600.0), (Mode::Jt9, 1000.0)] {
             let synth = match mode {
-                Mode::Jt65 => mfsk_core::jt65::tx::synthesize_standard(
-                    "CQ", "K1ABC", "FN42", 12_000, 1000.0, 0.3,
-                ),
-                _ => mfsk_core::jt9::tx::synthesize_standard(
-                    "CQ", "K1ABC", "FN42", 12_000, 1000.0, 0.3,
-                ),
+                Mode::Jt65 => {
+                    mfsk_core::jt65::tx::synthesize_standard("CQ", "K1ABC", "FN42", 12_000, hz, 0.3)
+                }
+                _ => {
+                    mfsk_core::jt9::tx::synthesize_standard("CQ", "K1ABC", "FN42", 12_000, hz, 0.3)
+                }
             }
             .expect("synthesize");
             // The scan wants a whole 60-second slot; pad the burst into one.
@@ -1477,10 +1508,35 @@ mod tests {
             let i16buf: Vec<i16> = slot.iter().map(|&s| (s * 20_000.0) as i16).collect();
 
             let decodes = decode_jt_slot(&i16buf, mode, 0);
-            let best = decodes.first().unwrap_or_else(|| panic!("{mode:?}: nothing decoded"));
+            let best =
+                decodes.first().unwrap_or_else(|| panic!("{mode:?} at {hz} Hz: nothing decoded"));
             assert_eq!(best.from.as_deref(), Some("K1ABC"), "{mode:?}: {decodes:?}");
             assert!(best.is_cq, "{mode:?}: {decodes:?}");
             assert_eq!(best.grid.as_deref(), Some("FN42"), "{mode:?}: {decodes:?}");
+            assert!(best.dt.abs() < 0.3, "{mode:?}: an on-time signal read DT {}", best.dt);
+        }
+    }
+
+    /// Noise alone decodes to nothing in either JT mode. The 72-bit message
+    /// has no CRC, so this is the decoder's own gates being tested — several
+    /// deterministic seeds, so a marginal gate shows up here rather than as an
+    /// invented callsign on an empty band.
+    #[test]
+    fn jt_noise_alone_decodes_nothing() {
+        for mode in [Mode::Jt65, Mode::Jt9] {
+            for seed in 1..=3u32 {
+                let mut rng = seed.wrapping_mul(0x9e37_79b9);
+                let noise: Vec<i16> = (0..60 * 12_000)
+                    .map(|_| {
+                        rng ^= rng << 13;
+                        rng ^= rng >> 17;
+                        rng ^= rng << 5;
+                        ((rng as i32 as f32 / i32::MAX as f32) * 6_000.0) as i16
+                    })
+                    .collect();
+                let decodes = decode_jt_slot(&noise, mode, 0);
+                assert!(decodes.is_empty(), "{mode:?} seed {seed}: noise decoded as {decodes:?}");
+            }
         }
     }
 

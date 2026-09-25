@@ -307,9 +307,10 @@ pub enum Mode {
     /// build, as [`Mode::Pi4`] is. Appended for the same reason as
     /// [`Mode::Hell`].
     Msk144,
-    /// JT65 — the classic EME (moonbounce) and weak-signal mode from WSJT:
-    /// 65-FSK, 2.69 baud, a 60-second slot, RS(63,12) error correction, and
-    /// the 72-bit JT message.
+    /// JT65 — the classic weak-signal mode from WSJT: 65-FSK, 2.69 baud, a
+    /// 60-second slot, RS(63,12) error correction, and the 72-bit JT message.
+    /// This is JT65A, the HF and 6 m sub-mode; the B and C sub-modes used for
+    /// moonbounce on 2 m and up are not decoded.
     ///
     /// A QSO mode, and a very slow one — a full exchange takes minutes — so
     /// its panel is the slotted decode list rather than a keyboard. Receive

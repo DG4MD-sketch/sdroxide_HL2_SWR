@@ -256,17 +256,18 @@ contacts, and it is receive only here.
 Selecting **JT65** or **JT9** opens the decode list alone: a reception list of
 the stations heard, with time, signal estimate, audio offset and the decoded
 `<to> <from> <grid|report>`. These are the two classic weak-signal modes from
-the WSJT family — JT65 is the EME (moonbounce) mode, and JT9 is its narrower,
-slower sibling for the weakest signals on HF. Both are receive only here.
+the WSJT family — JT65 is the older HF and 6 m weak-signal mode (its B and C
+sub-modes are the classic moonbounce ones; this build decodes JT65A), and JT9
+is its narrower, slower sibling for HF. Both are receive only here.
 
 - Both run on a **60-second slot** and carry a short 72-bit message, so a
   decode arrives a few seconds after the minute.
 - The **72-bit JT message carries no CRC**: the error correction is a
   Reed–Solomon code (JT65) or a convolutional one (JT9), and either can
-  converge on a well-formed message that was never sent when the band is
-  empty. The decoder orders what it finds by sync strength and keeps the
-  strongest few; on a real signal the true message is the strong one, but on
-  a dead band do not read a lone weak row as a station.
+  converge on a well-formed message that was never sent. The decoders'
+  own gates keep that rare — JT65's Reed–Solomon decode is strict, and JT9
+  checks sync and symbol quality — but on a dead band a lone weak row is
+  worth a second look before it goes in the log.
 - Tune the dial to the band and leave the audio cursor where the signals are —
   a JT signal is tiny (16 Hz wide for JT9, about 180 Hz for JT65) and the
   decoder searches the whole audio passband.
