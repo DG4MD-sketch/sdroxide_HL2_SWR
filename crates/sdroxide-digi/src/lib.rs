@@ -35,6 +35,7 @@ mod packet_controller;
 pub mod params;
 pub mod pi4;
 pub mod pi4_controller;
+pub mod q65_controller;
 pub mod qso;
 pub mod rade_controller;
 pub mod rf_paint_controller;
@@ -60,12 +61,15 @@ pub use fst4_controller::Fst4Controller;
 pub use hell_controller::HellController;
 pub use js8_controller::Js8Controller;
 pub use jt_controller::JtController;
-pub use modem::{ApHints, Ft8Modem, decode_fst4_slot, decode_jt_slot, decode_msk144_slot};
+pub use modem::{
+    ApHints, Ft8Modem, decode_fst4_slot, decode_jt_slot, decode_msk144_slot, decode_q65_slot,
+};
 pub use msk144_controller::Msk144Controller;
 pub use navtex_controller::NavtexController;
 pub use packet_controller::PacketController;
 pub use params::{DECODE_RATE, DigiParams};
 pub use pi4_controller::Pi4Controller;
+pub use q65_controller::Q65Controller;
 pub use qso::QsoMachine;
 pub use rade_controller::RadeController;
 pub use rf_paint_controller::RfPaintController;

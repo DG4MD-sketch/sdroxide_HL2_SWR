@@ -65,6 +65,7 @@ pub fn mode_to_civ(m: Mode) -> u8 {
         | Mode::Jt65
         | Mode::Jt9
         | Mode::Fst4
+        | Mode::Q65
         | Mode::Ft4
         | Mode::Ft2
         | Mode::Psk

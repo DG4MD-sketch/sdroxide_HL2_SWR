@@ -333,6 +333,17 @@ pub enum Mode {
     /// the chosen period. Receive only in this build, as [`Mode::Pi4`] is.
     /// Appended for the same reason as [`Mode::Hell`].
     Fst4,
+    /// Q65 — WSJT-X's modern weak-signal mode for EME, ionoscatter, meteor
+    /// scatter and other very low-SNR paths: 65-tone FSK with a Q-ary LDPC
+    /// code, carrying the same 77-bit message as FT8.
+    ///
+    /// Its sub-mode ([`crate::Q65Mode`]) fixes both the T/R period
+    /// (15/30/60/120/300 s) and the tone-spacing letter (A–E, wider for more
+    /// Doppler), so like FST4's period it is a setting rather than part of the
+    /// mode and [`Mode::slot_timing`] answers `None`. Receive only in this
+    /// build, as [`Mode::Pi4`] is. Appended for the same reason as
+    /// [`Mode::Hell`].
+    Q65,
 }
 
 /// The bands on which a mode that keeps phone practice rides the lower
@@ -353,7 +364,7 @@ const PHONE_LSB_BANDS: [(f64, f64); 3] =
 impl Mode {
     /// Every mode, in the order they cycle and appear in the picker — which is
     /// deliberately *not* the enum's declaration order (see [`Mode::Hell`]).
-    pub const ALL: [Mode; 47] = [
+    pub const ALL: [Mode; 48] = [
         Mode::Lsb,
         Mode::Usb,
         Mode::Cw,
@@ -401,6 +412,7 @@ impl Mode {
         Mode::Jt65,
         Mode::Jt9,
         Mode::Fst4,
+        Mode::Q65,
     ];
 
     /// The digital modes handled by a dedicated decode/encode engine (the
@@ -408,7 +420,7 @@ impl Mode {
     /// packet, RF Paint). All are USB underneath except RIFP, VHF packet and
     /// VHF SSTV, which frequency-modulate the carrier, and ACARS, which is
     /// received in AM.
-    pub const DIGITAL: [Mode; 29] = [
+    pub const DIGITAL: [Mode; 30] = [
         Mode::Ft8,
         Mode::Ft4,
         Mode::Ft2,
@@ -438,6 +450,7 @@ impl Mode {
         Mode::Jt65,
         Mode::Jt9,
         Mode::Fst4,
+        Mode::Q65,
     ];
 
     /// True for modes that use a dedicated decode/QSO layer over USB.
@@ -473,6 +486,7 @@ impl Mode {
                 | Mode::Jt65
                 | Mode::Jt9
                 | Mode::Fst4
+                | Mode::Q65
         )
     }
 
@@ -654,6 +668,7 @@ impl Mode {
                 | Mode::Jt65
                 | Mode::Jt9
                 | Mode::Fst4
+                | Mode::Q65
         )
     }
 
@@ -826,6 +841,9 @@ impl Mode {
                 // FST4 is a QSO mode, but transmit is not wired in this
                 // build — the panel is the decode list alone.
                 | Mode::Fst4
+                // Q65 is a QSO mode, but transmit is not wired in this
+                // build — the panel is the decode list alone.
+                | Mode::Q65
         )
     }
 
@@ -907,6 +925,7 @@ impl Mode {
             Mode::Jt65 => "JT65",
             Mode::Jt9 => "JT9",
             Mode::Fst4 => "FST4",
+            Mode::Q65 => "Q65",
         }
     }
 
@@ -968,6 +987,7 @@ impl Mode {
                 | Mode::Jt65
                 | Mode::Jt9
                 | Mode::Fst4
+                | Mode::Q65
         );
         crate::ModeProfile {
             agc: Some(if weak_digi { AgcMode::Slow } else { AgcMode::Med }),
@@ -1048,6 +1068,7 @@ impl Mode {
             | Mode::Jt65
             | Mode::Jt9
             | Mode::Fst4
+            | Mode::Q65
             | Mode::Psk
             | Mode::Rtty
             | Mode::Sstv
@@ -1299,7 +1320,8 @@ impl Mode {
             | Mode::Msk144
             | Mode::Jt65
             | Mode::Jt9
-            | Mode::Fst4 => C::Data,
+            | Mode::Fst4
+            | Mode::Q65 => C::Data,
         }
     }
 
@@ -1537,7 +1559,8 @@ impl Mode {
             | Mode::Msk144
             | Mode::Jt65
             | Mode::Jt9
-            | Mode::Fst4 => &[],
+            | Mode::Fst4
+            | Mode::Q65 => &[],
         }
     }
 }
@@ -2080,6 +2103,7 @@ mod tests {
             (Mode::Jt65, 44),
             (Mode::Jt9, 45),
             (Mode::Fst4, 46),
+            (Mode::Q65, 47),
         ];
         for (mode, index) in pinned {
             assert_eq!(mode as u8, index, "{} moved", mode.label());
@@ -2126,7 +2150,7 @@ mod tests {
         // dropped and nothing listed twice.
         // The last variant *by discriminant*, which is the one appended most
         // recently — not the one that reads last in the picker.
-        let last = Mode::Fst4 as u8;
+        let last = Mode::Q65 as u8;
         for i in 0..=last {
             let present = Mode::ALL.iter().filter(|m| **m as u8 == i).count();
             assert_eq!(present, 1, "discriminant {i} appears {present} times in Mode::ALL");

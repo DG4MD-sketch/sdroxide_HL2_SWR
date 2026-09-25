@@ -1474,7 +1474,15 @@ use sdroxide_types::{
 /// `Command::SetDigiConfig` and `DigiStatus` whole, so a v167 peer reads the
 /// extra bytes as the start of the next field and fails to decode every
 /// digital status — the same break as v162's appended CW settings.
-pub const PROTO_VERSION: u16 = 168;
+///
+/// v169: Q65, the modern weak-signal mode. `Mode::Q65` is appended to that
+/// enum and `DigiConfig` gains `q65_mode` (`Q65Mode`) on its tail, since the
+/// sub-mode fixes the period and the tone spacing rather than being part of the
+/// mode. `DigiConfig` rides `Command::SetDigiConfig` and `DigiStatus` whole, so
+/// a v168 peer reads the extra bytes as the start of the next field and fails
+/// to decode every digital status — the same break as v162's appended CW
+/// settings.
+pub const PROTO_VERSION: u16 = 169;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]

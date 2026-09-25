@@ -19,9 +19,9 @@ use sdroxide_config::BandStacks;
 use sdroxide_digi::{
     AcarsController, AprsController, AtChatController, CwController, DigiAction, DigiController,
     DigiEngine, FsqController, Fst4Controller, HellController, Js8Controller, JtController,
-    Msk144Controller, NavtexController, PacketController, Pi4Controller, RadeController,
-    RfPaintController, RifpController, SstvController, TextModemController, WefaxController,
-    WsprController,
+    Msk144Controller, NavtexController, PacketController, Pi4Controller, Q65Controller,
+    RadeController, RfPaintController, RifpController, SstvController, TextModemController,
+    WefaxController, WsprController,
 };
 use sdroxide_drm::DrmDemod;
 use sdroxide_dsp::{
@@ -6770,6 +6770,11 @@ impl Engine {
             // reason: FST4 is its own slow protocol whose period is a setting,
             // which the FT8 controller has no concept of.
             Box::new(Fst4Controller::new(self.digi_config.clone(), tap_rate))
+        } else if mode == Mode::Q65 {
+            // And again: Q65 is its own slow protocol whose sub-mode fixes both
+            // the period and the tone spacing, neither of which the FT8
+            // controller has a concept of.
+            Box::new(Q65Controller::new(self.digi_config.clone(), tap_rate))
         } else {
             Box::new(DigiController::new(mode, self.digi_config.clone(), tap_rate))
         }
@@ -17308,6 +17313,7 @@ fn rig_mode_class(m: Mode) -> u8 {
         | Mode::Jt65
         | Mode::Jt9
         | Mode::Fst4
+        | Mode::Q65
         | Mode::Psk
         | Mode::Rtty
         | Mode::Sstv

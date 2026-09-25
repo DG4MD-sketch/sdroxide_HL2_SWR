@@ -98,6 +98,9 @@ pub fn make_modulator(mode: Mode, rate: f64, passband: (f32, f32)) -> Option<Box
         // FST4 is receive-only in this build too: transmit needs a
         // sequencer, so there is no modulator rather than one that would put
         // an unsequenced burst on the air under an FST4 label.
+        // Q65 is receive-only in this build too: transmit needs a
+        // sequencer, so there is no modulator rather than one that would put
+        // an unsequenced burst on the air under a Q65 label.
         Mode::Pi4
         | Mode::Cw
         | Mode::Wfm
@@ -111,7 +114,8 @@ pub fn make_modulator(mode: Mode, rate: f64, passband: (f32, f32)) -> Option<Box
         | Mode::Msk144
         | Mode::Jt65
         | Mode::Jt9
-        | Mode::Fst4 => None,
+        | Mode::Fst4
+        | Mode::Q65 => None,
     }
 }
 

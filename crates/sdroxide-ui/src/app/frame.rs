@@ -748,6 +748,8 @@ impl eframe::App for SdroxideApp {
                                     self.jt_panel(ui, &mut cmds);
                                 } else if mode == Mode::Fst4 {
                                     self.fst4_panel(ui, &mut cmds);
+                                } else if mode == Mode::Q65 {
+                                    self.q65_panel(ui, &mut cmds);
                                 } else {
                                     self.digi_panel(ui, &mut cmds);
                                 }
