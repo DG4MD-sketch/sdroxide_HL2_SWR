@@ -122,7 +122,14 @@ jobs:
     env:
       SDROXIDE_BUILD: ${{ needs.targets.outputs.stamp }}
     steps:
+      # The client compiles none of the vendored code, but cargo reads every
+      # workspace member's manifest before building any of them, and
+      # sdroxide-hfdl reaches xng by path into the vendor/xng submodule.
+      # Without it cargo stops at "failed to get `xng-mode-hfdl`", which is
+      # what failed every nightly from 2026-09-24 on.
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -188,7 +195,8 @@ jobs:
           fi
 
       # `submodules` pulls vendor/rade_c (the RADE codec), vendor/faad2 (the AAC
-      # decoder the DRM receiver is built with) and vendor/rtl_433. HD Radio's
+      # decoder the DRM receiver is built with), vendor/rtl_433 and vendor/xng
+      # (the HFDL decode core). HD Radio's
       # decoder is not among them: it is the machine's own libnrsc5, loaded at
       # run time and never bundled (issue #488).
       - uses: actions/checkout@v7
