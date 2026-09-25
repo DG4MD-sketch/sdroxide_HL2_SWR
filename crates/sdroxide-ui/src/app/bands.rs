@@ -172,6 +172,7 @@ impl SdroxideApp {
                 },
             );
             self.ibp_section(ui);
+            self.meteor_section(ui);
         });
 
         ui.add_space(6.0);
@@ -224,4 +225,78 @@ impl SdroxideApp {
             ));
         }
     }
+
+    /// The meteor-shower list at the foot of the BANDS window.
+    ///
+    /// The one propagation forecast that has nothing to do with the ionosphere:
+    /// a shower's radiant and its date window are fixed, so what is shown is
+    /// whether it is active now, how strong its peak is, and whether the radiant
+    /// is above this station's horizon. Radiants are placed for the operator's
+    /// own locator, which is what makes "is it up" true here rather than on
+    /// average.
+    fn meteor_section(&self, ui: &mut egui::Ui) {
+        let Some((lat, lon)) = sdroxide_types::grid_to_latlon(&self.my_grid()) else {
+            return;
+        };
+        let active = sdroxide_solar::active_at(lat, lon, crate::time::now_unix());
+        if active.is_empty() {
+            return;
+        }
+        let dim = |s: &str| RichText::new(s.to_string()).size(9.5).color(dim_ink());
+        ui.add_space(12.0);
+        ui.label(
+            RichText::new("METEOR SHOWERS").size(10.0).strong().color(crate::theme::CYAN_DIM()),
+        );
+        ui.add_space(2.0);
+        ui.label(dim(&format!("radiants placed for {lat:.0}°, {lon:.0}°")));
+        ui.add_space(3.0);
+        for a in &active {
+            let s = a.shower;
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(s.name).size(11.0).strong());
+                ui.label(dim(s.code));
+                ui.label(RichText::new(format!("ZHR {}", s.zhr)).size(10.5));
+                if a.at_peak() {
+                    ui.label(RichText::new("PEAK").size(9.5).strong().color(crate::theme::GREEN()));
+                }
+                if a.radiant_up() {
+                    ui.label(
+                        RichText::new(format!(
+                            "radiant {:.0}° {}",
+                            a.alt_deg,
+                            sdroxide_solar::satellites::compass(a.az_deg)
+                        ))
+                        .size(10.5),
+                    );
+                } else {
+                    ui.label(
+                        RichText::new(format!("radiant down ({:.0}°)", a.alt_deg))
+                            .size(10.5)
+                            .color(dim_ink()),
+                    );
+                }
+            })
+            .response
+            .on_hover_text(format!(
+                "{} ({}) — {} km/s, parent {}. Peak rate ZHR {} around {}.\n\nA radiant \
+                 above the horizon means the trails can reach you; a fast shower leaves \
+                 longer-lived ionised trails for meteor scatter on 6 m and 2 m, and the \
+                 brief 10 m/11 m openings.",
+                s.name,
+                s.code,
+                s.velocity_kms,
+                s.parent,
+                s.zhr,
+                peak_label(s.peak),
+            ));
+        }
+    }
+}
+
+/// "3 Jan" from a `(month, day)` pair, for the hover.
+fn peak_label(peak: (u32, u32)) -> String {
+    const MONTHS: [&str; 12] =
+        ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let name = MONTHS.get(peak.0.saturating_sub(1) as usize).copied().unwrap_or("?");
+    format!("{} {name}", peak.1)
 }
