@@ -10808,12 +10808,17 @@ impl Engine {
 
     /// The rate the VDL2 window asks its down-converter for.
     ///
+    /// Derived from the device rate rather than a fixed figure, because a
+    /// down-converter rounds to the nearest whole decimation and a fixed target
+    /// lands under the plan on some front ends — a 768 kSPS Airspy HF+ among
+    /// them (issue #548). See [`sdroxide_vdl2::plan::window_target_rate_for`].
+    ///
     /// Capped at what the front end delivers, because a window is a decimation
     /// of that stream and not a second tuner. A receiver too narrow to hold even
     /// one channel therefore lands on its own rate, `sync_vdl2` refuses to
     /// start, and the panel says why.
     fn vdl2_target_rate_hz(&self) -> f64 {
-        sdroxide_vdl2::plan::WINDOW_TARGET_RATE_HZ.min(self.state.sample_rate)
+        sdroxide_vdl2::plan::window_target_rate_for(self.state.sample_rate)
     }
 
     /// Where the window sits: over the channel plan where the span reaches it,
