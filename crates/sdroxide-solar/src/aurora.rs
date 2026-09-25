@@ -327,9 +327,9 @@ pub fn recent(points: &[KpPoint], now: i64, horizon_s: i64) -> impl Iterator<Ite
     // The bin containing `now` has not finished, so it belongs to the forecast
     // half ([`upcoming`]); requiring the bin to have *ended* is what keeps the
     // two from both showing it.
-    points
-        .iter()
-        .filter(move |p| !p.predicted && p.unix + 10_800 <= now && p.unix + 10_800 > now - horizon_s)
+    points.iter().filter(move |p| {
+        !p.predicted && p.unix + 10_800 <= now && p.unix + 10_800 > now - horizon_s
+    })
 }
 
 /// The worst bin in the next `horizon_s` seconds.

@@ -12753,9 +12753,13 @@ northern one for exactly that reason.
 | `Kp peak 24 h` | The worst three-hour bin still ahead of you in NOAA's planetary K forecast, and how far away it is. |
 | `viewline` | Roughly how far towards the equator that Kp puts the aurora, as a **geomagnetic** latitude. A rule of thumb — see below. |
 
-Under the rows, one bar per three-hour bin over the next day: the shape answers
-"is it worth staying up" faster than eight numbers would. Green is quiet, yellow
-worth watching, pink a storm. The footer says what the picture is *valid for*
+Under the rows, one bar per three-hour bin: the last day as NOAA measured it,
+then the next day as it forecasts it, with a line where one gives way to the
+other. The measured bars are solid and the forecast ones a paler wash, so a
+prediction is never read as an observation; the bin in progress is NOAA's
+running estimate and is drawn solid. The shape answers "is it worth staying up"
+— and whether a storm is building or already easing — faster than sixteen
+numbers would. Green is quiet, yellow worth watching, pink a storm. The footer says what the picture is *valid for*
 and how old the fetch is — never what time it is now, because the grid is a
 forecast for about forty minutes ahead and may itself be half an hour old.
 
