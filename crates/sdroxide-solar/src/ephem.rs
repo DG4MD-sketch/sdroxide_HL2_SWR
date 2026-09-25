@@ -541,8 +541,10 @@ pub fn is_daylight_at(lat_deg: f64, lon_deg: f64, unix_s: i64) -> bool {
 /// A little above the horizon, so the shade sits on the shadow rather than
 /// through the middle of the terminator.
 const NIGHT_DAY_TOP_DEG: f64 = 2.0;
-/// Solar elevation at which the shade reaches full strength, in degrees. Below
-/// it is astronomical night; the band between the two is twilight.
+/// Solar elevation at which the shade reaches full strength, in degrees —
+/// between the end of nautical twilight (−12°) and of astronomical (−18°), where
+/// the sky is dark to the eye. The band between this and [`NIGHT_DAY_TOP_DEG`]
+/// is the twilight the grey line is drawn in.
 const NIGHT_FULL_DEG: f64 = -14.0;
 /// Alpha of the darkest shade, as a fraction. Not opaque: the coastlines,
 /// borders and any propagation heat stay readable underneath it.

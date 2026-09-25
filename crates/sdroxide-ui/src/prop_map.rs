@@ -221,8 +221,10 @@ impl NightShade {
             let (w, h) = (NIGHT_SHADE_W, NIGHT_SHADE_H);
             let rgba = sdroxide_solar::night_shade_rgba(w, h, minute * 60);
             let px: Vec<eframe::egui::Color32> = rgba
-                .chunks_exact(4)
-                .map(|c| eframe::egui::Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|&[r, g, b, a]| eframe::egui::Color32::from_rgba_unmultiplied(r, g, b, a))
                 .collect();
             let img = eframe::egui::ColorImage {
                 size: [w, h],

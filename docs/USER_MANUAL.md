@@ -3429,6 +3429,13 @@ not from a picture of it, so they are one dot wide at every zoom — a frontier
 stays a hairline in the right place whether the map is showing a hemisphere or
 a valley, instead of swelling into a band as you go in.
 
+**NIGHT**, beside **PROP** above the map, shades the side of the Earth where the
+Sun is down, with the twilight between as a graded band, so the grey line shows
+on the map. Low bands go long and high bands close on the night side, and the
+terminator itself is where DX often turns up. It follows the clock, not the
+decodes, so it works with nothing heard yet; it is off by default and is the
+same switch on the FT8/FT4/FT2 and WSPR maps.
+
 Drag (or one finger) to pan, wheel or pinch to zoom about the pointer, and
 double-click to hand the view back to the auto-fit.
 
@@ -4642,6 +4649,8 @@ actually getting through; pressing it reveals the rest of the controls —
 `ALL BANDS` or `ONE BAND`, which band, and the absolute path count the brightest
 cell stands for. [§7.8](#78-the-propagation-heat-map) explains what the
 shading means. The same picture, with more control over it, is on the 3D globe.
+**NIGHT**, beside it, shades the night side and the twilight
+([the world map](#the-world-map)).
 
 Drag the strip under the map to resize it against the status pane.
 
@@ -12909,7 +12918,9 @@ gets a control point per hop.
 
 On the flat map the controls are the **PROP** button above it; on the globe they
 are the `PROP` button in the menu bar, which adds the source filter and the
-half-life. Both draw the same field.
+half-life. Both draw the same field. The flat map's **NIGHT** button, beside
+**PROP**, lays the night side and the twilight over it, which is the part of the
+picture the globe gets from its own lighting.
 
 **Signal reports are made comparable before they are pooled.** WSPR, FT8, FT4, FT2 and
 JS8 all quote SNR in a 2500 Hz bandwidth, but their decode floors are ten

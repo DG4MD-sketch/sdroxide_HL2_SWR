@@ -183,9 +183,7 @@ impl SdroxideApp {
         &mut self,
         ctx: &egui::Context,
     ) -> Option<eframe::egui::TextureId> {
-        self.view
-            .map_night
-            .then(|| self.night_shade.texture(ctx, crate::time::now_unix()))
+        self.view.map_night.then(|| self.night_shade.texture(ctx, crate::time::now_unix()))
     }
 
     /// The chip row that turns the flat map's propagation heat on and picks
