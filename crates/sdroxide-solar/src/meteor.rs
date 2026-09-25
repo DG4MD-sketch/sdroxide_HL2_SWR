@@ -15,9 +15,8 @@
 //!
 //! Why a listener cares: a meteor leaves an ionised trail, and a trail that
 //! crosses a path briefly opens it — meteor scatter is worked on 6 m and 2 m
-//! (and heard as the "pings" on the low VHF broadcast band), and the long
-//! over-the-horizon paths on 10 m and 11 m can come alive for seconds at a
-//! time. The useful question is not "how many meteors" but "is the radiant
+//! (and heard as the "pings" on the low VHF broadcast band), and long
+//! over-the-horizon paths on 10 m can come alive for seconds at a time. The useful question is not "how many meteors" but "is the radiant
 //! above the horizon, and is the shower near its peak".
 
 use crate::ephem::{gmst_deg, julian_day};
@@ -62,7 +61,7 @@ pub const SHOWERS: &[Shower] = &[
         start: (12, 28),
         peak: (1, 3),
         end: (1, 12),
-        zhr: 110,
+        zhr: 80,
         ra_deg: 230.0,
         dec_deg: 49.0,
         velocity_kms: 41,
@@ -91,6 +90,21 @@ pub const SHOWERS: &[Shower] = &[
         dec_deg: -1.0,
         velocity_kms: 66,
         parent: "1P/Halley",
+    },
+    // A daytime shower: its radiant is a few degrees from the Sun, so it is
+    // seen by radar and heard by meteor scatter rather than watched — the
+    // strongest of the year for radio, and the rate is the radio-derived one.
+    Shower {
+        name: "Daytime Arietids",
+        code: "ARI",
+        start: (5, 14),
+        peak: (6, 7),
+        end: (6, 24),
+        zhr: 30,
+        ra_deg: 44.0,
+        dec_deg: 24.0,
+        velocity_kms: 38,
+        parent: "96P/Machholz complex (?)",
     },
     Shower {
         name: "Southern Delta Aquariids",
@@ -191,9 +205,9 @@ pub const SHOWERS: &[Shower] = &[
     Shower {
         name: "Northern Taurids",
         code: "NTA",
-        start: (10, 13),
+        start: (10, 20),
         peak: (11, 12),
-        end: (12, 2),
+        end: (12, 10),
         zhr: 5,
         ra_deg: 58.0,
         dec_deg: 22.0,
@@ -217,7 +231,7 @@ pub const SHOWERS: &[Shower] = &[
         code: "GEM",
         start: (12, 4),
         peak: (12, 14),
-        end: (12, 17),
+        end: (12, 20),
         zhr: 150,
         ra_deg: 112.0,
         dec_deg: 33.0,
@@ -405,6 +419,15 @@ mod tests {
         assert!(codes(at(2026, 1, 3, 1)).contains(&"QUA"));
         assert!(codes(at(2026, 12, 30, 1)).contains(&"QUA"));
         assert!(!codes(at(2026, 7, 1, 1)).contains(&"QUA"));
+        // The Daytime Arietids, the radio shower, peak in early June — and
+        // their radiant is up in daylight, which is the point of them.
+        let june = active_at(50.0, 0.0, at(2026, 6, 7, 10));
+        let ari = june.iter().find(|a| a.shower.code == "ARI").expect("ARI active on 7 June");
+        assert!(ari.at_peak() && ari.radiant_up(), "the Arietid radiant is up mid-morning");
+        // The Geminids run to the 20th, the Northern Taurids into December.
+        assert!(codes(at(2026, 12, 19, 1)).contains(&"GEM"));
+        assert!(codes(at(2026, 12, 8, 1)).contains(&"NTA"));
+        assert!(!codes(at(2026, 10, 15, 1)).contains(&"NTA"));
     }
 
     /// The pole sits at the latitude and due north, whatever the date — the

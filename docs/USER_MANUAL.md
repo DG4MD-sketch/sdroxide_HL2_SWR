@@ -2070,6 +2070,19 @@ five frequencies and a beacon you hear is a path that is open to that part of
 the world, which is a measurement rather than a forecast. The beacon sites are
 the NCDXF's published list, placed at the centre of each one's locator.
 
+**Meteor showers.** Below the beacons, while one is running, are the annual
+meteor showers active today, strongest first: the name and the International
+Meteor Organization's code, the peak rate (ZHR), a **PEAK** mark on the peak
+date, and where the shower's radiant is from your locator — its altitude and
+compass direction, or *radiant down*. Hover for the parent comet and the speed.
+A meteor's ionised trail briefly opens a path: that is meteor scatter on 6 m
+and 2 m, and the short bursts on 10 m. What matters is whether the radiant is
+above your horizon, which is why it is worked out for your station rather than
+listed; a fast shower leaves longer-lived trails. The Daytime Arietids in June
+have their radiant close to the Sun and cannot be seen at all, but they are the
+strongest shower of the year for radio. The table is the IMO's working list, so
+it needs no network, and the section only appears once your locator is set.
+
 ### 2.16 Satellite operation (SAT)
 
 ![Satellite mode window](images/satellite.jpg)

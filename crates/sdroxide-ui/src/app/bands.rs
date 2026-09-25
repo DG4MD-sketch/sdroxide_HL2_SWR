@@ -281,7 +281,7 @@ impl SdroxideApp {
                 "{} ({}) — {} km/s, parent {}. Peak rate ZHR {} around {}.\n\nA radiant \
                  above the horizon means the trails can reach you; a fast shower leaves \
                  longer-lived ionised trails for meteor scatter on 6 m and 2 m, and the \
-                 brief 10 m/11 m openings.",
+                 brief 10 m openings.",
                 s.name,
                 s.code,
                 s.velocity_kms,
