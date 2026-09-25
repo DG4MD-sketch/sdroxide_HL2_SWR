@@ -246,9 +246,10 @@ contacts, and it is receive only here.
   fixed offset. A row's **DT** is therefore not an offset from a frame start
   but **how far into the period** the burst was found.
 - It carries the same 77-bit message as FT8, so a decode reads the same way.
-- Tune to the meteor-scatter calling frequencies — for example **50.260 MHz**
-  on 6 m and **144.200 MHz** on 2 m — and leave the audio cursor alone: the
-  decoder searches the whole audio passband.
+- Tune to the MSK144 calling frequencies — **50.260 MHz** (**50.380** in IARU
+  Region 1) on 6 m and **144.150 MHz** (**144.360** in Region 1) on 2 m — and
+  keep the audio cursor on **1500 Hz**, where everyone transmits: the decoder
+  searches 200 Hz either side of the cursor.
 
 ## JT65 and JT9
 

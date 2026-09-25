@@ -774,7 +774,7 @@ impl Mode {
             // back to back, so a meteor's brief trail catches part of one. The
             // burst figure is one frame; the steady stream is why the decoder
             // scans the whole slot rather than a fixed offset.
-            Mode::Msk144 => Some(SlotTiming { slot_s: 15.0, tx_offset_s: 0.0, burst_s: 0.4 }),
+            Mode::Msk144 => Some(SlotTiming { slot_s: 15.0, tx_offset_s: 0.0, burst_s: 0.072 }),
             // JT65A is 126 symbols of 4460/12000 s — 46.83 s — keyed one
             // second into a 60-second slot, the offset WSJT-X uses for the
             // whole JT65/JT9 family. The burst is short enough that the

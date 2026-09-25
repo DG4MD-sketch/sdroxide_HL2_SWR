@@ -873,23 +873,33 @@ fn join3(a: &str, b: &str, c: &str) -> String {
     [a, b, c].iter().filter(|t| !t.is_empty()).copied().collect::<Vec<_>>().join(" ")
 }
 
-/// Decode one 15-second MSK144 slot of 12 kHz mono i16 audio.
+/// How far either side of the audio cursor the MSK144 decoder searches, in Hz.
+///
+/// MSK144's tones sit 500 Hz either side of its centre, and the short-ping
+/// search looks `2 × tolerance` either side of each tone line in the squared
+/// signal's spectrum — so a tolerance of 500 Hz or more makes the high- and
+/// low-tone windows overlap, and the frequency-error estimate the short-ping
+/// path depends on can lock to the wrong line. The long-ping search's cost also
+/// grows with it. 200 Hz covers a station a little off the cursor.
+pub const MSK144_TOLERANCE_HZ: f32 = 200.0;
+
+/// Decode one 15-second MSK144 slot of 12 kHz mono i16 audio, searching
+/// [`MSK144_TOLERANCE_HZ`] either side of `audio_hz`.
 ///
 /// MSK144 is not a frame at a fixed offset: the operator transmits through the
 /// whole period and the decoder slides a window across the slot looking for
-/// meteor-trail bursts, so it is handed the passband centre and half-width to
-/// search rather than a start time — and each result carries the time *into*
-/// the slot (`.tsec`) the burst was found at, which becomes the [`Decode`]'s
-/// `dt`.
+/// meteor-trail bursts, so it is handed the centre and half-width to search
+/// rather than a start time — and each result carries the time *into* the
+/// slot (`.tsec`) the burst was found at, which becomes the [`Decode`]'s `dt`.
+/// The centre is the operator's audio cursor, as WSJT-X's is: 1500 Hz is the
+/// convention everyone transmits on.
 ///
 /// Unlike every other mode here, mfsk-core resolves the message text inside
 /// the decode call, so there are no raw 77 bits for us to unpack: the text is
 /// already a `String` and goes through the same parser an FT8 decode does.
-pub fn decode_msk144_slot(audio_12k: &[i16], slot_utc: i64) -> Vec<Decode> {
+pub fn decode_msk144_slot(audio_12k: &[i16], audio_hz: f32, slot_utc: i64) -> Vec<Decode> {
     use mfsk_core::msk144::decode::{Depth, decode_slot};
-    let fc = (AUDIO_MIN_HZ + AUDIO_MAX_HZ) / 2.0;
-    let ntol = (AUDIO_MAX_HZ - AUDIO_MIN_HZ) / 2.0;
-    decode_slot(audio_12k, fc, ntol, Depth::Deep)
+    decode_slot(audio_12k, audio_hz, MSK144_TOLERANCE_HZ, Depth::Deep)
         .into_iter()
         .map(|r| {
             let p = parse_message(&r.message, MsgKind::Standard);
@@ -1427,11 +1437,20 @@ mod tests {
             let env = if (0.0..=10.0).contains(&t) { 2.718 * t * (-t).exp() } else { 0.0 };
             slot.push((s as f32 * env) as i16);
         }
-        let decodes = decode_msk144_slot(&slot, 0);
+        let decodes = decode_msk144_slot(&slot, 1500.0, 0);
         assert!(
             decodes.iter().any(|d| d.message == "K1ABC W9XYZ EN37"),
             "MSK144 did not round-trip: {decodes:?}"
         );
+        // A station a little off the cursor is still inside the search...
+        let decodes = decode_msk144_slot(&slot, 1650.0, 0);
+        assert!(
+            decodes.iter().any(|d| d.message == "K1ABC W9XYZ EN37"),
+            "150 Hz off the cursor was not found: {decodes:?}"
+        );
+        // ...and one well outside it is not searched for.
+        let decodes = decode_msk144_slot(&slot, 2100.0, 0);
+        assert!(decodes.is_empty(), "600 Hz off the cursor still decoded: {decodes:?}");
     }
 
     /// A synthesized JT65 and JT9 message decodes back to the same

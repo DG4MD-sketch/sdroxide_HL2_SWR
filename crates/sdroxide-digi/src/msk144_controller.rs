@@ -18,7 +18,7 @@
 //! at a time: a machine that cannot keep up must drop a slot rather than fall a
 //! slot further behind every fifteen seconds.
 
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::time::SystemTime;
 
 use sdroxide_dsp::MonoResampler;
@@ -33,6 +33,8 @@ use crate::scheduler::SlotScheduler;
 /// One slot of audio handed to the decode worker.
 struct DecodeJob {
     audio: Vec<i16>,
+    /// The audio cursor when the slot ended: the centre the decoder searches.
+    audio_hz: f32,
     slot_utc: i64,
 }
 
@@ -48,17 +50,23 @@ pub struct Msk144Controller {
     resampler: Option<MonoResampler>,
     /// 12 kHz audio accumulated for the slot in progress.
     slot_buf: Vec<i16>,
+    /// Whether `slot_buf` began at a slot boundary. It does not after a start,
+    /// a reset or a config change part-way through a slot, and a buffer that
+    /// began mid-slot puts every burst at the wrong time into it — so such a
+    /// slot is dropped rather than decoded.
+    buf_aligned: bool,
     tap_scratch: Vec<f32>,
     last_slot_idx: i64,
-    /// Where the operator's audio cursor sits, for the readout and the
-    /// passband marker. MSK144 is worked anywhere in the passband.
+    /// Where the operator's audio cursor sits: the centre the decoder searches
+    /// ([`crate::modem::MSK144_TOLERANCE_HZ`] either side), the readout and the
+    /// passband marker.
     audio_hz: f32,
 
     job_tx: Sender<DecodeJob>,
     res_rx: Receiver<DecodeResult>,
     _worker: std::thread::JoinHandle<()>,
-    /// A slot dispatched but not yet answered, so the panel can say "decoding"
-    /// rather than "nothing heard" during the seconds it takes.
+    /// A slot dispatched but not yet answered. One at a time: a machine that
+    /// cannot keep up drops a slot rather than queueing them.
     pending: bool,
 
     /// Decodes from the last completed slot, and how many, for the status.
@@ -76,7 +84,7 @@ impl Msk144Controller {
             .name("sdroxide-msk144-decode".into())
             .spawn(move || {
                 while let Ok(job) = job_rx.recv() {
-                    let decodes = decode_msk144_slot(&job.audio, job.slot_utc);
+                    let decodes = decode_msk144_slot(&job.audio, job.audio_hz, job.slot_utc);
                     if res_tx.send(DecodeResult { decodes }).is_err() {
                         break;
                     }
@@ -90,6 +98,7 @@ impl Msk144Controller {
             cfg,
             resampler: MonoResampler::new(tap_rate, DECODE_RATE),
             slot_buf: Vec::new(),
+            buf_aligned: false,
             tap_scratch: Vec::new(),
             last_slot_idx: i64::MIN,
             // WSJT-X's own MSK144 working frequency: 1500 Hz up from the dial.
@@ -140,34 +149,46 @@ impl DigiEngine for Msk144Controller {
     fn poll(&mut self, now: SystemTime, _dial_hz: f64) -> Vec<DigiAction> {
         let mut actions = Vec::new();
 
-        // 1. Drain the worker. `try_recv` stops on both Empty and Disconnected,
-        // which are the two cases with nothing left to take.
-        while let Ok(res) = self.res_rx.try_recv() {
-            self.pending = false;
-            self.last_count = res.decodes.len() as u32;
-            self.status_dirty = true;
-            if !res.decodes.is_empty() {
-                actions.push(DigiAction::Decodes(res.decodes));
+        // 1. Drain the worker.
+        loop {
+            match self.res_rx.try_recv() {
+                Ok(res) => {
+                    self.pending = false;
+                    self.last_count = res.decodes.len() as u32;
+                    self.status_dirty = true;
+                    if !res.decodes.is_empty() {
+                        actions.push(DigiAction::Decodes(res.decodes));
+                    }
+                }
+                Err(TryRecvError::Empty) => break,
+                // The worker is gone and no answer is coming. Release the slot
+                // rather than holding `pending` for the rest of the session,
+                // which would stop every later slot being dispatched.
+                Err(TryRecvError::Disconnected) => {
+                    self.pending = false;
+                    break;
+                }
             }
         }
 
         // 2. Slot boundary: dispatch the completed slot to the worker.
         let idx = self.scheduler.slot_index(now);
         if idx != self.last_slot_idx {
-            if self.last_slot_idx != i64::MIN {
-                // Half a slot of audio is the floor: less than that is a mode
-                // change or a stream hiccup, not a transmission.
-                let min_samples = (self.params.slot_s * DECODE_RATE * 0.5) as usize;
-                if self.slot_buf.len() >= min_samples && !self.pending {
-                    let audio = std::mem::take(&mut self.slot_buf);
-                    // The slot that just ended is the one before this boundary.
-                    let slot_utc = self.scheduler.slot_start_unix(idx - 1) as i64;
-                    self.pending = true;
-                    let _ = self.job_tx.send(DecodeJob { audio, slot_utc });
-                } else {
-                    self.slot_buf.clear();
-                }
+            // Only a slot whose audio began on its own boundary is decoded, and
+            // half a slot of it is the floor: less than that is a stream
+            // hiccup, not a transmission.
+            let min_samples = (self.params.slot_s * DECODE_RATE * 0.5) as usize;
+            if self.buf_aligned && self.slot_buf.len() >= min_samples && !self.pending {
+                let audio = std::mem::take(&mut self.slot_buf);
+                // The slot that just ended is the one before this boundary.
+                let slot_utc = self.scheduler.slot_start_unix(idx - 1) as i64;
+                let job = DecodeJob { audio, audio_hz: self.audio_hz, slot_utc };
+                self.pending = self.job_tx.send(job).is_ok();
             }
+            self.slot_buf.clear();
+            // The very first poll is not a boundary crossing, only the first
+            // look at the clock — part-way through a slot.
+            self.buf_aligned = self.last_slot_idx != i64::MIN;
             self.last_slot_idx = idx;
         }
         if self.status_dirty {
@@ -189,6 +210,7 @@ impl DigiEngine for Msk144Controller {
 
     fn abort(&mut self) {
         self.slot_buf.clear();
+        self.buf_aligned = false;
         self.status_dirty = true;
     }
 
@@ -206,6 +228,7 @@ impl DigiEngine for Msk144Controller {
 
     fn set_audio_hz(&mut self, hz: f32) {
         self.audio_hz = hz.clamp(200.0, 3500.0);
+        self.status_dirty = true;
     }
 
     fn audio_hz(&self) -> f32 {
@@ -214,5 +237,37 @@ impl DigiEngine for Msk144Controller {
 
     fn status(&self) -> DigiStatus {
         self.digi_status()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    /// A slot is decoded only when its audio began on the slot's own boundary.
+    /// Starting part-way through a period must not hand the decoder a buffer
+    /// whose start is not the period's start — every burst in it would carry
+    /// the wrong time into the slot.
+    #[test]
+    fn only_a_slot_that_began_on_its_boundary_is_decoded() {
+        let mut c = Msk144Controller::new(DigiConfig::default(), DECODE_RATE);
+        let at = |s: f64| UNIX_EPOCH + Duration::from_secs_f64(1_800_000_000.0 + s);
+        let second = vec![0.0f32; DECODE_RATE as usize];
+
+        // Start 5 s into a period and hear the rest of it.
+        c.poll(at(5.0), 0.0);
+        for _ in 0..10 {
+            c.on_rx_audio(&second);
+        }
+        c.poll(at(15.0), 0.0);
+        assert!(!c.pending, "the partial first period was dispatched");
+
+        // The next period is heard from its boundary, so it is decoded.
+        for _ in 0..15 {
+            c.on_rx_audio(&second);
+        }
+        c.poll(at(30.0), 0.0);
+        assert!(c.pending, "a whole, aligned period was not dispatched");
     }
 }

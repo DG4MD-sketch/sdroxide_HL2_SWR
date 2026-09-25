@@ -5854,9 +5854,12 @@ FT8.
 
 #### Where it is
 
-6 m and 2 m, on the meteor-scatter calling frequencies — for example
-**50.260 MHz** on 6 m and **144.200 MHz** on 2 m. Tune the dial there and
-leave the audio cursor alone: the decoder searches the whole audio passband.
+6 m and 2 m, and 70 cm, on the MSK144 calling frequencies WSJT-X uses:
+**50.260 MHz** on 6 m (**50.380** in IARU Region 1), **144.150 MHz** on 2 m
+(**144.360** in Region 1) and **432.360 MHz**. Tune the dial there and keep the
+audio cursor on **1500 Hz**, the offset everyone transmits at. The decoder
+searches **200 Hz either side of the cursor**, so a station a little off
+frequency is still found; move the cursor onto one further away.
 
 #### What you see
 
