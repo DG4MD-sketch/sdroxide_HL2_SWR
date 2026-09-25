@@ -989,9 +989,9 @@ pub fn decode_fst4_slot(
             .into_iter()
             .filter_map(|r| {
                 let bits: [u8; 77] = r.message77().try_into().ok()?;
-                // FST4 carries the same 77-bit message as FT8, with no
-                // CB-shape gate needed here: FST4 has no hashed-callsign
-                // layout and its caller is a VHF/EME station, not an 11 m one.
+                // FST4 carries the same 77-bit message as FT8, hashed-callsign
+                // layouts included. No session hash table is kept for it, so a
+                // hashed callsign reads as `<...>` rather than being resolved.
                 build_decode(
                     &bits,
                     r.snr_db,
@@ -1540,6 +1540,31 @@ mod tests {
         }
     }
 
+    /// `Fst4Period` states FST4's geometry in `sdroxide-types`, which cannot
+    /// depend on mfsk-core; this is where the two are held to agree — the slot,
+    /// the symbol length and the transmit offset every decode's DT is measured
+    /// from. FST4-15 alone keys half a second in.
+    #[test]
+    fn fst4_periods_match_mfsk_cores_geometry() {
+        use mfsk_core::engine::{FrameLayout, ModulationParams};
+        use sdroxide_types::Fst4Period;
+        fn check<P: FrameLayout + ModulationParams>(p: Fst4Period) {
+            assert_eq!(p.nsps(), P::NSPS as usize, "FST4-{} NSPS", p.label());
+            assert_eq!(p.slot_s(), f64::from(P::T_SLOT_S), "FST4-{} slot", p.label());
+            assert_eq!(
+                p.start_delay_s(),
+                f64::from(P::TX_START_OFFSET_S),
+                "FST4-{} transmit offset",
+                p.label()
+            );
+        }
+        check::<mfsk_core::fst4::Fst4s15>(Fst4Period::P15);
+        check::<mfsk_core::fst4::Fst4s30>(Fst4Period::P30);
+        check::<mfsk_core::fst4::Fst4s60>(Fst4Period::P60);
+        check::<mfsk_core::fst4::Fst4s120>(Fst4Period::P120);
+        check::<mfsk_core::fst4::Fst4s300>(Fst4Period::P300);
+    }
+
     /// A synthesized FST4 message decodes back at every period. FST4 shares
     /// FT8's 77-bit message with no CRC-free ambiguity, so exactly one decode
     /// of the right message is expected; the period decides the slot the audio
@@ -1571,6 +1596,8 @@ mod tests {
                 .unwrap_or_else(|| panic!("FST4-{}: nothing decoded: {decodes:?}", period.label()));
             assert!(best.is_cq, "FST4-{}: {decodes:?}", period.label());
             assert_eq!(best.grid.as_deref(), Some("FN42"), "FST4-{}", period.label());
+            // Keyed at the period's own offset, it is on time.
+            assert!(best.dt.abs() < 0.3, "FST4-{}: DT {}", period.label(), best.dt);
         }
     }
 

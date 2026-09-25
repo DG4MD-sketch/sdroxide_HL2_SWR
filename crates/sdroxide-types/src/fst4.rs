@@ -78,10 +78,16 @@ impl Fst4Period {
         }
     }
 
-    /// Delay from the slot boundary to the first symbol, in seconds. FST4 keys
-    /// half a second in, as FT4 does — not at the boundary as FT8 does.
+    /// Delay from the slot boundary to the first symbol, in seconds: one
+    /// second for every period but FST4-15, which keys half a second in so its
+    /// 9.6 s burst leaves room to decode. WSJT-X's `Modulator.cpp` and
+    /// mfsk-core's own sub-modes both say so, and a decode's DT is measured
+    /// from it.
     pub fn start_delay_s(self) -> f64 {
-        0.5
+        match self {
+            Fst4Period::P15 => 0.5,
+            _ => 1.0,
+        }
     }
 
     /// On-air duration of one transmission: 160 symbols at this period's

@@ -343,6 +343,10 @@ mod dispatch_tests {
             "sstv"
         } else if mode.is_wefax() {
             "wefax"
+        } else if mode == Mode::Navtex {
+            "navtex"
+        } else if mode == Mode::Acars {
+            "acars"
         } else if mode.is_rifp() {
             "rifp"
         } else if mode.is_aprs() {
@@ -361,6 +365,18 @@ mod dispatch_tests {
             "js8"
         } else if mode.is_wspr() {
             "wspr"
+        } else if mode.is_pi4() {
+            "pi4"
+        } else if mode == Mode::Msk144 {
+            "msk144"
+        } else if matches!(mode, Mode::Jt65 | Mode::Jt9) {
+            "jt"
+        } else if mode == Mode::Fst4 {
+            "fst4"
+        } else if mode == Mode::Q65 {
+            "q65"
+        } else if mode == Mode::Fsk441 {
+            "fsk441"
         } else {
             "ft8"
         }
@@ -376,6 +392,15 @@ mod dispatch_tests {
         // in the same passband, and a controller handed FT8's decoder would sit
         // there finding nothing for ever without a word.
         assert_eq!(pick(Mode::Wspr), "wspr");
+        // The slotted weak-signal modes are the same trap again, every one of
+        // them: slotted, in the same passband, and silent under FT8's decoder.
+        assert_eq!(pick(Mode::Pi4), "pi4");
+        assert_eq!(pick(Mode::Msk144), "msk144");
+        assert_eq!(pick(Mode::Jt65), "jt");
+        assert_eq!(pick(Mode::Jt9), "jt");
+        assert_eq!(pick(Mode::Fst4), "fst4");
+        assert_eq!(pick(Mode::Q65), "q65");
+        assert_eq!(pick(Mode::Fsk441), "fsk441");
         assert_eq!(pick(Mode::Ft8), "ft8");
         assert_eq!(pick(Mode::Ft4), "ft8");
         assert_eq!(pick(Mode::Ft2), "ft8");
@@ -387,6 +412,8 @@ mod dispatch_tests {
         // would hand it an FT8 decoder and its NET station would never join.
         assert_eq!(pick(Mode::AtChat), "atchat");
         assert_eq!(pick(Mode::Wefax), "wefax");
+        assert_eq!(pick(Mode::Navtex), "navtex");
+        assert_eq!(pick(Mode::Acars), "acars");
         // Both packet modes reach the one packet controller. HF packet is the
         // quiet trap of the pair: it is a keyboard-shaped mode on a sideband,
         // so `is_text_modem` further down would look like a plausible home and
