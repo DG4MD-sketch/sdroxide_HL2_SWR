@@ -16,7 +16,7 @@
 //! slot in flight at a time: a machine that cannot keep up must drop a slot
 //! rather than fall a slot further behind every minute.
 
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::time::SystemTime;
 
 use sdroxide_dsp::MonoResampler;
@@ -48,6 +48,11 @@ pub struct JtController {
     resampler: Option<MonoResampler>,
     /// 12 kHz audio accumulated for the slot in progress.
     slot_buf: Vec<i16>,
+    /// Whether `slot_buf` began at a slot boundary. It does not after a start,
+    /// a reset or a period change part-way through a slot, and a buffer that
+    /// began mid-slot is not the slot the decoder is told it is — so such a
+    /// slot is dropped rather than decoded.
+    buf_aligned: bool,
     tap_scratch: Vec<f32>,
     last_slot_idx: i64,
     /// Where the operator's audio cursor sits, for the readout and the
@@ -57,8 +62,8 @@ pub struct JtController {
     job_tx: Sender<DecodeJob>,
     res_rx: Receiver<DecodeResult>,
     _worker: std::thread::JoinHandle<()>,
-    /// A slot dispatched but not yet answered, so the panel can say "decoding"
-    /// rather than "nothing heard" during the seconds it takes.
+    /// A slot dispatched but not yet answered. One at a time: a machine that
+    /// cannot keep up drops a slot rather than queueing them.
     pending: bool,
 
     /// Decodes from the last completed slot, and how many, for the status.
@@ -90,6 +95,7 @@ impl JtController {
             cfg,
             resampler: MonoResampler::new(tap_rate, DECODE_RATE),
             slot_buf: Vec::new(),
+            buf_aligned: false,
             tap_scratch: Vec::new(),
             last_slot_idx: i64::MIN,
             // WSJT-X's own JT working frequency: 1000 Hz up from the dial.
@@ -140,34 +146,46 @@ impl DigiEngine for JtController {
     fn poll(&mut self, now: SystemTime, _dial_hz: f64) -> Vec<DigiAction> {
         let mut actions = Vec::new();
 
-        // 1. Drain the worker. `try_recv` stops on both Empty and Disconnected,
-        // which are the two cases with nothing left to take.
-        while let Ok(res) = self.res_rx.try_recv() {
-            self.pending = false;
-            self.last_count = res.decodes.len() as u32;
-            self.status_dirty = true;
-            if !res.decodes.is_empty() {
-                actions.push(DigiAction::Decodes(res.decodes));
+        // 1. Drain the worker.
+        loop {
+            match self.res_rx.try_recv() {
+                Ok(res) => {
+                    self.pending = false;
+                    self.last_count = res.decodes.len() as u32;
+                    self.status_dirty = true;
+                    if !res.decodes.is_empty() {
+                        actions.push(DigiAction::Decodes(res.decodes));
+                    }
+                }
+                Err(TryRecvError::Empty) => break,
+                // The worker is gone and no answer is coming. Release the slot
+                // rather than holding `pending` for the rest of the session,
+                // which would stop every later slot being dispatched.
+                Err(TryRecvError::Disconnected) => {
+                    self.pending = false;
+                    break;
+                }
             }
         }
 
         // 2. Slot boundary: dispatch the completed slot to the worker.
         let idx = self.scheduler.slot_index(now);
         if idx != self.last_slot_idx {
-            if self.last_slot_idx != i64::MIN {
-                // Half a slot of audio is the floor: less than that is a mode
-                // change or a stream hiccup, not a transmission.
-                let min_samples = (self.params.slot_s * DECODE_RATE * 0.5) as usize;
-                if self.slot_buf.len() >= min_samples && !self.pending {
-                    let audio = std::mem::take(&mut self.slot_buf);
-                    // The slot that just ended is the one before this boundary.
-                    let slot_utc = self.scheduler.slot_start_unix(idx - 1) as i64;
-                    self.pending = true;
-                    let _ = self.job_tx.send(DecodeJob { audio, mode: self.mode, slot_utc });
-                } else {
-                    self.slot_buf.clear();
-                }
+            // Only a slot whose audio began on its own boundary is decoded, and
+            // half a slot of it is the floor: less than that is a stream
+            // hiccup, not a transmission.
+            let min_samples = (self.params.slot_s * DECODE_RATE * 0.5) as usize;
+            if self.buf_aligned && self.slot_buf.len() >= min_samples && !self.pending {
+                let audio = std::mem::take(&mut self.slot_buf);
+                // The slot that just ended is the one before this boundary.
+                let slot_utc = self.scheduler.slot_start_unix(idx - 1) as i64;
+                self.pending =
+                    self.job_tx.send(DecodeJob { audio, mode: self.mode, slot_utc }).is_ok();
             }
+            self.slot_buf.clear();
+            // The very first poll is not a boundary crossing, only the first
+            // look at the clock — part-way through a slot.
+            self.buf_aligned = self.last_slot_idx != i64::MIN;
             self.last_slot_idx = idx;
         }
         if self.status_dirty {
@@ -189,6 +207,7 @@ impl DigiEngine for JtController {
 
     fn abort(&mut self) {
         self.slot_buf.clear();
+        self.buf_aligned = false;
         self.status_dirty = true;
     }
 

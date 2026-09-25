@@ -20,7 +20,7 @@
 //!
 //! Receive only in this build.
 
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::time::SystemTime;
 
 use sdroxide_dsp::{FSK441_RATE, MonoResampler};
@@ -51,6 +51,11 @@ pub struct Fsk441Controller {
     resampler: Option<MonoResampler>,
     /// 11 025 Hz audio accumulated for the slot in progress.
     slot_buf: Vec<f32>,
+    /// Whether `slot_buf` began at a slot boundary. It does not after a start,
+    /// a reset or a period change part-way through a slot, and a buffer that
+    /// began mid-slot is not the slot the decoder is told it is — so such a
+    /// slot is dropped rather than decoded.
+    buf_aligned: bool,
     tap_scratch: Vec<f32>,
     last_slot_idx: i64,
     audio_hz: f32,
@@ -86,6 +91,7 @@ impl Fsk441Controller {
             scheduler: SlotScheduler::new(period.slot_s(), period.start_delay_s()),
             resampler: MonoResampler::new(tap_rate, FSK441_RATE),
             slot_buf: Vec::new(),
+            buf_aligned: false,
             tap_scratch: Vec::new(),
             last_slot_idx: i64::MIN,
             // FSK441's tones sit 882–2205 Hz; the centre is where the cursor
@@ -135,28 +141,44 @@ impl DigiEngine for Fsk441Controller {
     fn poll(&mut self, now: SystemTime, _dial_hz: f64) -> Vec<DigiAction> {
         let mut actions = Vec::new();
 
-        while let Ok(res) = self.res_rx.try_recv() {
-            self.pending = false;
-            self.last_count = res.decodes.len() as u32;
-            self.status_dirty = true;
-            if !res.decodes.is_empty() {
-                actions.push(DigiAction::Decodes(res.decodes));
+        // Drain the worker.
+        loop {
+            match self.res_rx.try_recv() {
+                Ok(res) => {
+                    self.pending = false;
+                    self.last_count = res.decodes.len() as u32;
+                    self.status_dirty = true;
+                    if !res.decodes.is_empty() {
+                        actions.push(DigiAction::Decodes(res.decodes));
+                    }
+                }
+                Err(TryRecvError::Empty) => break,
+                // The worker is gone and no answer is coming. Release the slot
+                // rather than holding `pending` for the rest of the session,
+                // which would stop every later slot being dispatched.
+                Err(TryRecvError::Disconnected) => {
+                    self.pending = false;
+                    break;
+                }
             }
         }
 
         let idx = self.scheduler.slot_index(now);
         if idx != self.last_slot_idx {
-            if self.last_slot_idx != i64::MIN {
-                let min_samples = (self.period.slot_s() * FSK441_RATE * 0.5) as usize;
-                if self.slot_buf.len() >= min_samples && !self.pending {
-                    let audio = std::mem::take(&mut self.slot_buf);
-                    let slot_utc = self.scheduler.slot_start_unix(idx - 1) as i64;
-                    self.pending = true;
-                    let _ = self.job_tx.send(DecodeJob { audio, slot_utc });
-                } else {
-                    self.slot_buf.clear();
-                }
+            // Only a slot whose audio began on its own boundary is decoded, and
+            // half a slot of it is the floor: less than that is a stream
+            // hiccup, not a transmission.
+            let min_samples = (self.period.slot_s() * FSK441_RATE * 0.5) as usize;
+            if self.buf_aligned && self.slot_buf.len() >= min_samples && !self.pending {
+                let audio = std::mem::take(&mut self.slot_buf);
+                // The slot that just ended is the one before this boundary.
+                let slot_utc = self.scheduler.slot_start_unix(idx - 1) as i64;
+                self.pending = self.job_tx.send(DecodeJob { audio, slot_utc }).is_ok();
             }
+            self.slot_buf.clear();
+            // The very first poll is not a boundary crossing, only the first
+            // look at the clock — part-way through a slot.
+            self.buf_aligned = self.last_slot_idx != i64::MIN;
             self.last_slot_idx = idx;
         }
         if self.status_dirty {
@@ -178,6 +200,7 @@ impl DigiEngine for Fsk441Controller {
 
     fn abort(&mut self) {
         self.slot_buf.clear();
+        self.buf_aligned = false;
         self.status_dirty = true;
     }
 
@@ -192,6 +215,7 @@ impl DigiEngine for Fsk441Controller {
             self.period = cfg.fsk441_period;
             self.scheduler = SlotScheduler::new(self.period.slot_s(), self.period.start_delay_s());
             self.slot_buf.clear();
+            self.buf_aligned = false;
             self.last_slot_idx = i64::MIN;
         }
         self.cfg = cfg;
