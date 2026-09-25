@@ -1032,6 +1032,42 @@ pub fn decode_q65_slot(
     }
 }
 
+/// Decode one FSK441 slot of mono f32 audio at
+/// [`sdroxide_dsp::FSK441_RATE`](sdroxide_dsp::FSK441_RATE).
+///
+/// FSK441 is a meteor-scatter mode: the operator transmits the message over and
+/// over through the whole period and the receiver hears only the short
+/// reflections off ionised trails, so the decoder hunts the slot for pings.
+/// Each [`sdroxide_dsp::Fsk441Ping`] carries the time into the slot it was
+/// found at, which becomes the [`Decode`]'s `dt`.
+///
+/// The audio is at the decoder's own rate — 441 baud × 25 samples — and not the
+/// 12 kHz the other modes use: the controller resamples to it before this sees
+/// a sample, because those constants are the mode and do not re-derive at
+/// another rate.
+pub fn decode_fsk441_slot(audio: &[f32], slot_utc: i64) -> Vec<Decode> {
+    sdroxide_dsp::fsk441_find_pings(audio)
+        .into_iter()
+        .map(|p| {
+            let parsed = parse_message(&p.text, MsgKind::Standard);
+            Decode {
+                slot_utc,
+                snr_db: p.snr_db.round() as i16,
+                dt: p.start_s,
+                audio_hz: p.audio_hz,
+                message: p.text,
+                to: parsed.to,
+                from: parsed.from,
+                grid: parsed.grid,
+                is_cq: parsed.is_cq,
+                cq_to: parsed.cq_to,
+                free_text: parsed.free_text,
+                rr73_to: parsed.rr73_to,
+            }
+        })
+        .collect()
+}
+
 /// Unpack 77 message bits and build a [`Decode`], or `None` if unpacking fails.
 /// `hashes` resolves the `<...>` placeholders of hashed callsigns, and
 /// `eu_hashes` the ones the EU VHF contest layout uses — see [`eu_vhf::Hashes`]
@@ -1515,6 +1551,44 @@ mod tests {
             .unwrap_or_else(|| panic!("Q65-{}: nothing decoded: {decodes:?}", m.label()));
         assert!(best.is_cq, "Q65-{}: {decodes:?}", m.label());
         assert_eq!(best.grid.as_deref(), Some("FN42"), "Q65-{}", m.label());
+    }
+
+    /// A synthesized FSK441 ping decodes through the modem adapter into a
+    /// [`Decode`] with the text and its parsed addressing. The waveform is the
+    /// fork's own generator at the decoder's 11 025 Hz, with noise and a small
+    /// amplitude behind it, so this exercises the adapter and the parser rather
+    /// than a bare round trip of the generator against itself.
+    #[test]
+    fn fsk441_ping_round_trips_through_the_adapter() {
+        use sdroxide_dsp::{FSK441_RATE, fsk441_encode_tones, fsk441_generate_audio};
+
+        let msg = "W1ABC W9XYZ FN42";
+        let audio = fsk441_generate_audio(&fsk441_encode_tones(msg));
+        let npts = FSK441_RATE as usize * 2;
+        let start = npts / 3;
+        // Deterministic noise, so the test cannot flake.
+        let mut slot = vec![0.0f32; npts];
+        let mut state = 0x9e37_79b9u32;
+        for s in slot.iter_mut() {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            *s = ((state >> 8) as f32 / 8_388_608.0 - 1.0) * 0.15;
+        }
+        for (i, &s) in audio.iter().enumerate() {
+            if start + i < npts {
+                slot[start + i] += s * 0.7;
+            }
+        }
+
+        let decodes = decode_fsk441_slot(&slot, 0);
+        let d = decodes
+            .iter()
+            .find(|d| d.message == msg)
+            .unwrap_or_else(|| panic!("FSK441 did not round-trip: {decodes:?}"));
+        assert_eq!(d.to.as_deref(), Some("W1ABC"));
+        assert_eq!(d.from.as_deref(), Some("W9XYZ"));
+        assert_eq!(d.grid.as_deref(), Some("FN42"));
+        // The ping is reported where it was keyed.
+        assert!((d.dt - start as f32 / FSK441_RATE as f32).abs() < 0.06, "dt {}", d.dt);
     }
 
     #[test]

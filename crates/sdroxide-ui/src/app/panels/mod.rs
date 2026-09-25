@@ -111,6 +111,9 @@ pub(in crate::app) fn panel_panes(mode: Mode) -> &'static [&'static str] {
         // The decode list alone: the QSO pane is FT8's sequencer, which a
         // receive-only Q65 build has nothing to put in.
         Mode::Q65 => &["DECODES"],
+        // The decode list alone: the QSO pane is FT8's sequencer, which a
+        // receive-only FSK441 build has nothing to put in.
+        Mode::Fsk441 => &["DECODES"],
         // The keyboard modes and RADE are one column already: receive above,
         // what you are sending below it.
         _ => &["PANEL"],
@@ -1053,8 +1056,47 @@ impl SdroxideApp {
             // cannot see — the same shape as JS8's speed, answered from the
             // editor config the panel just wrote.
             Mode::Q65 => Some(self.digi_cfg_edit.q65_mode.slot_timing()),
+            // FSK441's clock is its period, which is a config field the mode
+            // cannot see — the same shape as JS8's speed, answered from the
+            // editor config the panel just wrote.
+            Mode::Fsk441 => Some(self.digi_cfg_edit.fsk441_period.slot_timing()),
             _ => mode.slot_timing(),
         }
+    }
+
+    /// The FSK441 panel: the period chip row, the slot clock and the decode
+    /// list, and nothing else.
+    ///
+    /// An FSK441 decode is an ordinary [`sdroxide_types::Decode`], so the list
+    /// is the one the FT8 modes share. What is missing is the QSO area — a
+    /// meteor-scatter exchange this build does not sequence (it is receive-only)
+    /// — so the sequencer, the transmit pane and the call queue have nothing to
+    /// drive.
+    pub(in crate::app) fn fsk441_panel(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<Command>) {
+        // FSK441's T/R period is the one thing about it an operator chooses,
+        // and it decides the slot length the ping search runs over — so it gets
+        // a chip row, exactly as JS8's speed does.
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("FSK441").size(11.0).strong().color(crate::theme::CYAN()));
+            ui.label(RichText::new("period").size(10.0).weak());
+            for p in sdroxide_types::Fsk441Period::ALL {
+                let on = self.digi_cfg_edit.fsk441_period == p;
+                if crate::chrome::chip(ui, on, RichText::new(p.label()).size(10.5))
+                    .on_hover_text(format!("{}-second T/R period", p.label()))
+                    .clicked()
+                    && !on
+                {
+                    self.digi_cfg_edit.fsk441_period = p;
+                    if self.digi_cfg_seeded {
+                        cmds.push(Command::SetDigiConfig(self.digi_cfg_edit.clone()));
+                    }
+                }
+            }
+        });
+        ui.add_space(4.0);
+        self.slot_progress(ui);
+        ui.add_space(4.0);
+        self.decode_list(ui, cmds);
     }
 
     /// The slot length of the current mode, in seconds.

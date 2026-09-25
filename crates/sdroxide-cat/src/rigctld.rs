@@ -80,6 +80,7 @@ fn mode_name(m: Mode) -> &'static str {
         | Mode::Jt9
         | Mode::Fst4
         | Mode::Q65
+        | Mode::Fsk441
         | Mode::Ft4
         | Mode::Ft2
         | Mode::Psk

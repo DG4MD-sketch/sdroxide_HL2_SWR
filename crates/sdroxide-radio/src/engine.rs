@@ -18,10 +18,10 @@ use sdroxide_ais::{AisAction, AisController};
 use sdroxide_config::BandStacks;
 use sdroxide_digi::{
     AcarsController, AprsController, AtChatController, CwController, DigiAction, DigiController,
-    DigiEngine, FsqController, Fst4Controller, HellController, Js8Controller, JtController,
-    Msk144Controller, NavtexController, PacketController, Pi4Controller, Q65Controller,
-    RadeController, RfPaintController, RifpController, SstvController, TextModemController,
-    WefaxController, WsprController,
+    DigiEngine, Fsk441Controller, FsqController, Fst4Controller, HellController, Js8Controller,
+    JtController, Msk144Controller, NavtexController, PacketController, Pi4Controller,
+    Q65Controller, RadeController, RfPaintController, RifpController, SstvController,
+    TextModemController, WefaxController, WsprController,
 };
 use sdroxide_drm::DrmDemod;
 use sdroxide_dsp::{
@@ -6775,6 +6775,11 @@ impl Engine {
             // the period and the tone spacing, neither of which the FT8
             // controller has a concept of.
             Box::new(Q65Controller::new(self.digi_config.clone(), tap_rate))
+        } else if mode == Mode::Fsk441 {
+            // FSK441 is its own meteor-scatter protocol and its own decoder —
+            // mfsk-core has none — and its slot is a period setting, so the
+            // FT8 fall-through has neither its protocol nor its clock.
+            Box::new(Fsk441Controller::new(self.digi_config.clone(), tap_rate))
         } else {
             Box::new(DigiController::new(mode, self.digi_config.clone(), tap_rate))
         }
@@ -17327,6 +17332,7 @@ fn rig_mode_class(m: Mode) -> u8 {
         | Mode::Rade
         | Mode::PacketHf
         | Mode::AtChat
+        | Mode::Fsk441
         | Mode::Spec => 1,
         // DRM sits on the dial in a channel about as wide as AM's, and a
         // rig has no DRM setting to report back — see `to_hamlib_mode`.
