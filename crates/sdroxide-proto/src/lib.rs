@@ -1467,7 +1467,14 @@ use sdroxide_types::{
 /// declaration index and rides `RadioState`, so a v166 peer handed one runs
 /// off the end of the enum — the same break every appended `Mode` causes, and
 /// the same fix (the two sides run in lockstep).
-pub const PROTO_VERSION: u16 = 167;
+///
+/// v168: FST4, the slow weak-signal mode. `Mode::Fst4` is appended to that
+/// enum and `DigiConfig` gains `fst4_period` (`Fst4Period`) on its tail, since
+/// the period is a setting rather than part of the mode. `DigiConfig` rides
+/// `Command::SetDigiConfig` and `DigiStatus` whole, so a v167 peer reads the
+/// extra bytes as the start of the next field and fails to decode every
+/// digital status — the same break as v162's appended CW settings.
+pub const PROTO_VERSION: u16 = 168;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]

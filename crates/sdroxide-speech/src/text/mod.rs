@@ -159,6 +159,9 @@ impl<'a> Speaker<'a> {
             Mode::Msk144 => "M S K one forty four",
             Mode::Jt65 => "J T sixty five",
             Mode::Jt9 => "J T nine",
+            // Pronounced as a word, like "whisper" and "rade" above — FST4 is
+            // said "F S T four", not spelt out.
+            Mode::Fst4 => "F S T four",
             Mode::Drm => "D R M",
             Mode::HdRadio => "H D radio",
             Mode::Adsb => "A D S B",

@@ -910,6 +910,68 @@ pub fn decode_msk144_slot(audio_12k: &[i16], slot_utc: i64) -> Vec<Decode> {
         .collect()
 }
 
+/// Decode one full FST4 slot of 12 kHz mono i16 audio at the chosen period.
+///
+/// FST4 goes through the same generic [`DecodeRequest`] as FT4 and shares its
+/// 77-bit message, so the mapping to [`Decode`] is FT4's; only the protocol
+/// type parameter differs, and the five periods are five types rather than a
+/// runtime width. The slot length is the period the operator chose — the
+/// caller must hand in that many seconds of audio, which is what
+/// [`sdroxide_types::Fst4Period`]'s timing gives the controller.
+pub fn decode_fst4_slot(
+    audio_12k: &[i16],
+    period: sdroxide_types::Fst4Period,
+    slot_utc: i64,
+) -> Vec<Decode> {
+    use mfsk_core::msg::decode_request::DecodeRequest;
+    // FST4's own example uses a sync floor of 0.8 and a small candidate cap:
+    // it is a deep, sparse mode, so there are few signals and a lower bar is
+    // safe. The FT8 family's 1.5 would hide the weak ones this mode exists
+    // for.
+    const FST4_SYNC_MIN: f32 = 0.8;
+    const FST4_MAX_CAND: usize = 30;
+    // The five periods are five protocol types rather than a runtime width, so
+    // the request cannot be built once behind a generic closure; the macro
+    // writes the arms out instead, exactly as the crate's own example does.
+    macro_rules! run {
+        ($p:ty) => {
+            DecodeRequest::<$p>::new(
+                audio_12k,
+                AUDIO_MIN_HZ,
+                AUDIO_MAX_HZ,
+                FST4_SYNC_MIN,
+                FST4_MAX_CAND,
+            )
+            .decode()
+            .results
+            .into_iter()
+            .filter_map(|r| {
+                let bits: [u8; 77] = r.message77().try_into().ok()?;
+                // FST4 carries the same 77-bit message as FT8, with no
+                // CB-shape gate needed here: FST4 has no hashed-callsign
+                // layout and its caller is a VHF/EME station, not an 11 m one.
+                build_decode(
+                    &bits,
+                    r.snr_db,
+                    r.dt_sec,
+                    r.freq_hz,
+                    slot_utc,
+                    &CallsignHashTable::new(),
+                    &eu_vhf::Hashes::default(),
+                )
+            })
+            .collect()
+        };
+    }
+    match period {
+        sdroxide_types::Fst4Period::P15 => run!(mfsk_core::fst4::Fst4s15),
+        sdroxide_types::Fst4Period::P30 => run!(mfsk_core::fst4::Fst4s30),
+        sdroxide_types::Fst4Period::P60 => run!(mfsk_core::fst4::Fst4s60),
+        sdroxide_types::Fst4Period::P120 => run!(mfsk_core::fst4::Fst4s120),
+        sdroxide_types::Fst4Period::P300 => run!(mfsk_core::fst4::Fst4s300),
+    }
+}
+
 /// Unpack 77 message bits and build a [`Decode`], or `None` if unpacking fails.
 /// `hashes` resolves the `<...>` placeholders of hashed callsigns, and
 /// `eu_hashes` the ones the EU VHF contest layout uses — see [`eu_vhf::Hashes`]
@@ -1304,6 +1366,40 @@ mod tests {
             assert_eq!(best.from.as_deref(), Some("K1ABC"), "{mode:?}: {decodes:?}");
             assert!(best.is_cq, "{mode:?}: {decodes:?}");
             assert_eq!(best.grid.as_deref(), Some("FN42"), "{mode:?}: {decodes:?}");
+        }
+    }
+
+    /// A synthesized FST4 message decodes back at every period. FST4 shares
+    /// FT8's 77-bit message with no CRC-free ambiguity, so exactly one decode
+    /// of the right message is expected; the period decides the slot the audio
+    /// has to be padded into.
+    #[test]
+    fn fst4_messages_round_trip_at_every_period() {
+        use sdroxide_types::Fst4Period;
+        for period in Fst4Period::ALL {
+            let msg77 = mfsk_core::msg::wsjt77::pack77("CQ", "K1ABC", "FN42").expect("pack77");
+            let itone = mfsk_core::fst4::encode::message_to_tones(&msg77);
+            let cfg = match period {
+                Fst4Period::P15 => &mfsk_core::fst4::encode::FST4_15_GFSK,
+                Fst4Period::P30 => &mfsk_core::fst4::encode::FST4_30_GFSK,
+                Fst4Period::P60 => &mfsk_core::fst4::encode::FST4_60A_GFSK,
+                Fst4Period::P120 => &mfsk_core::fst4::encode::FST4_120_GFSK,
+                Fst4Period::P300 => &mfsk_core::fst4::encode::FST4_300_GFSK,
+            };
+            let burst = mfsk_core::fst4::encode::tones_to_f32_with_gfsk(&itone, 1000.0, 0.3, cfg);
+            // Pad into a whole slot at the period's TX offset.
+            let mut slot = vec![0.0f32; (period.start_delay_s() * 12_000.0).round() as usize];
+            slot.extend_from_slice(&burst);
+            slot.resize((period.slot_s() * 12_000.0) as usize, 0.0);
+            let i16buf: Vec<i16> = slot.iter().map(|&s| (s * 20_000.0) as i16).collect();
+
+            let decodes = decode_fst4_slot(&i16buf, period, 0);
+            let best = decodes
+                .iter()
+                .find(|d| d.from.as_deref() == Some("K1ABC"))
+                .unwrap_or_else(|| panic!("FST4-{}: nothing decoded: {decodes:?}", period.label()));
+            assert!(best.is_cq, "FST4-{}: {decodes:?}", period.label());
+            assert_eq!(best.grid.as_deref(), Some("FN42"), "FST4-{}", period.label());
         }
     }
 

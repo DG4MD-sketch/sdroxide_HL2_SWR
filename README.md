@@ -76,7 +76,9 @@ One binary, three ways to run it:
   15-second period, the decoder hunting each period for the brief
   meteor-trail bursts), receive-only **JT65** and
   **JT9** (the classic WSJT weak-signal modes — 65-FSK and 9-FSK in a
-  60-second slot, for EME and the weakest HF paths),
+  60-second slot, for EME and the weakest HF paths), receive-only **FST4** (the
+  slow weak-signal mode for EME, troposcatter and LF/MF — 160-symbol GFSK in a
+  15/30/60/120/300-second T/R period, the same 77-bit message as FT8),
   **Hellschreiber** (all seven Feld Hell / FSK Hell variants, on a scrolling
   raster), image **SSTV** (Scottie, Martin, Robot), image **RIFP**
   (draft-dulaunoy-rifp-00 — packetised, checksummed pictures over a 4800-baud
@@ -262,6 +264,24 @@ slower sibling for the weakest signals on HF. Both are receive only here.
 - Tune the dial to the band and leave the audio cursor where the signals are —
   a JT signal is tiny (16 Hz wide for JT9, about 180 Hz for JT65) and the
   decoder searches the whole audio passband.
+
+## FST4
+
+Selecting **FST4** opens the decode list with a period chip row above it:
+choose the **T/R period** — 15, 30, 60, 120 or 300 seconds — and the slot
+length and the decode both follow. FST4 is the slow weak-signal mode of the
+same WSJT family, built for the paths where JT65 and FT8 run out: EME
+(moonbounce), troposcatter, and LF/MF propagation experiments. It is receive
+only here.
+
+- The period is the whole trade: a short one is a fast terrestrial signal, a
+  long one digs tens of dB under the noise for a moonbounce path. **60
+  seconds is the band convention** and the default. Both ends of a contact
+  have to agree on it.
+- A decode is the same `<to> <from> <grid|report>` as FT8/FT4, since FST4
+  carries the same 77-bit message.
+- On the longer periods expect the list to fill in well after the period
+  ends: an FST4-300 scan is tens of seconds of work over a five-minute slot.
 
 ## Propagation heat map
 
