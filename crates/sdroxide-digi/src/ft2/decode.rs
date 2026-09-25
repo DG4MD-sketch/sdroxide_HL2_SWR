@@ -87,7 +87,10 @@ const BP_MAX_ITER: u32 = 40;
 /// decoded signal from the audio, and look again on what is left — which is
 /// the only way a weak signal inside a stronger neighbour's occupied
 /// bandwidth (167 Hz here, twice FT4's) is ever decoded. Two rounds are the
-/// measured choice for FT4 and find nothing more from a third.
+/// measured choice for FT4 and find nothing more from a third. A round that
+/// decodes nothing new ends the loop: nothing was subtracted, so the next
+/// round would search the same audio at a lower floor, which costs a second
+/// full search in a 3.75 s slot and is not subtraction at all.
 const SIC_ROUNDS: usize = 2;
 
 /// Per-round coarse-sync floor multiplier, as mfsk-core's FT4 SIC uses: a
@@ -142,21 +145,27 @@ pub fn decode_slot(
             RxGrid::real(DECODE_RATE as f32),
         );
         if candidates.is_empty() {
-            continue;
+            break;
         }
         let fft_cache = build_fft_cache(&residual, &FT2_DOWNSAMPLE);
-        let new: Vec<DecodeResult> =
+        let mut new: Vec<DecodeResult> =
             candidates.par_iter().filter_map(|c| process_candidate(c, &fft_cache)).collect();
 
-        // Already-decoded transmissions reappear in a later round's residual
-        // (subtraction is a model, not a perfect cancellation); keep each
-        // message once, at the coordinates of its first decode.
+        // Two candidates a few hertz apart routinely resolve to the same
+        // transmission, and already-decoded transmissions reappear in a later
+        // round's residual (subtraction is a model, not a perfect
+        // cancellation). Keep each message once: within a round the copy with
+        // the cleaner sync, across rounds the first round's.
+        new.sort_by(|a, b| b.sync_score.total_cmp(&a.sync_score));
         let mut fresh: Vec<DecodeResult> = Vec::new();
         for r in new {
             if all.iter().any(|k| k.info == r.info) || fresh.iter().any(|k| k.info == r.info) {
                 continue;
             }
             fresh.push(r);
+        }
+        if fresh.is_empty() {
+            break;
         }
         for r in &fresh {
             let Ok(bits): Result<[u8; 77], _> = r.message77().try_into() else { continue };
@@ -176,17 +185,8 @@ pub fn decode_slot(
         all.extend(fresh);
     }
 
-    // Two candidates a few hertz apart routinely resolve to the same
-    // transmission; keep the one with the cleaner sync.
-    all.sort_by(|a, b| b.sync_score.total_cmp(&a.sync_score));
-    let mut kept: Vec<DecodeResult> = Vec::with_capacity(all.len());
-    for r in all {
-        if !kept.iter().any(|k| k.info == r.info && (k.freq_hz - r.freq_hz).abs() < 20.0) {
-            kept.push(r);
-        }
-    }
-    kept.sort_by(|a, b| a.freq_hz.total_cmp(&b.freq_hz));
-    kept
+    all.sort_by(|a, b| a.freq_hz.total_cmp(&b.freq_hz));
+    all
 }
 
 /// One coarse candidate through refine → LLR → BP → OSD. `None` when nothing
@@ -417,8 +417,6 @@ mod tests {
         assert!(texts.iter().any(|t| t == "CQ IU8LMC JN70"), "{texts:?}");
     }
 
-    /// Noise alone must not produce messages; CRC-14 is the only thing
-    /// standing between OSD and invented callsigns.
     /// A weak FT2 signal buried under a strong one at the same audio offset
     /// must still decode. This is what the SIC rounds exist for: the strong
     /// signal's 167 Hz occupied bandwidth covers the weak one, and only
@@ -448,6 +446,8 @@ mod tests {
         assert!(texts.iter().any(|t| t == "CQ IU8LMC JN70"), "weak signal lost: {texts:?}");
     }
 
+    /// Noise alone must not produce messages; CRC-14 is the only thing
+    /// standing between OSD and invented callsigns.
     #[test]
     fn silence_and_noise_decode_to_nothing() {
         let quiet = vec![0i16; (Ft2::T_SLOT_S * 12_000.0) as usize];
