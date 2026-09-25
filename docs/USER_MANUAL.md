@@ -5988,9 +5988,12 @@ Q65 has two independent axes, and the chip row at the top of the panel picks
 the combination. The **T/R period** is **15, 30, 60, 120 or 300 seconds**,
 and the **tone-spacing letter** (A–E) widens the signal — **A** is the narrow,
 sensitive terrestrial choice; **E** tolerates the most Doppler spread for
-fast-fading microwave paths. **Q65-60A** (60-second period, letter A) is the
-band convention and the default. Both ends of a contact have to agree, so
-check what the other station is running. Ten sub-modes are wired here: 15A,
+fast-fading microwave paths. **Q65-30A** (30-second period, letter A) is the
+default, the usual choice for terrestrial weak-signal work; the 60-second
+sub-modes are the usual EME choice. Both ends of a contact have to agree, so
+check what the other station is running. The 15 s and 30 s sub-modes key half a
+second into the period and the rest a full second, as WSJT-X does, and **DT**
+is measured from there. Ten sub-modes are wired here: 15A,
 30A, 60A–60E, 120D, 120E and 300A.
 
 #### What you see

@@ -52,26 +52,10 @@ pub enum Q65Mode {
 
 impl Q65Mode {
     /// Every sub-mode, in declaration order — which is the *wire* order, since
-    /// postcard numbers variants by it. [`Q65Mode::UI_ORDER`] is what a picker
-    /// lists.
+    /// postcard numbers variants by it — and also the order a picker lists
+    /// them in: the short terrestrial ones first, then the 60 s EME lineup
+    /// widening letter by letter, then the long scatter modes.
     pub const ALL: [Q65Mode; 10] = [
-        Q65Mode::A15,
-        Q65Mode::A30,
-        Q65Mode::A60,
-        Q65Mode::B60,
-        Q65Mode::C60,
-        Q65Mode::D60,
-        Q65Mode::E60,
-        Q65Mode::D120,
-        Q65Mode::E120,
-        Q65Mode::A300,
-    ];
-
-    /// Every sub-mode as an operator reads them: the short terrestrial ones
-    /// first, then the 60 s EME lineup widening letter by letter, then the
-    /// long scatter modes — a dial from fast and narrow to slow and wide
-    /// rather than the crate's declaration order.
-    pub const UI_ORDER: [Q65Mode; 10] = [
         Q65Mode::A15,
         Q65Mode::A30,
         Q65Mode::A60,
@@ -122,10 +106,12 @@ impl Q65Mode {
         }
     }
 
-    /// Delay from the slot boundary to the first symbol: one second, the
-    /// convention WSJT-X uses for Q65.
+    /// Delay from the slot boundary to the first symbol: half a second for the
+    /// 15 s and 30 s sub-modes and one second for the rest, as WSJT-X keys
+    /// them (`Modulator.cpp`: 500 ms for Q65 at `nsps <= 3600`) and centres its
+    /// search (`q65.f90`). A decode's DT is measured from it.
     pub fn start_delay_s(self) -> f64 {
-        1.0
+        if self.nsps() <= 3_600 { 0.5 } else { 1.0 }
     }
 
     /// On-air duration of one transmission: 85 symbols at this sub-mode's
@@ -179,13 +165,5 @@ mod tests {
         // The long modes are genuinely longer.
         assert!(Q65Mode::A300.burst_s() > Q65Mode::A60.burst_s());
         assert!(Q65Mode::E120.burst_s() > Q65Mode::A60.burst_s());
-    }
-
-    /// UI order is a permutation of ALL, with nothing dropped or doubled.
-    #[test]
-    fn ui_order_is_a_permutation() {
-        for m in Q65Mode::ALL {
-            assert_eq!(Q65Mode::UI_ORDER.iter().filter(|x| **x == m).count(), 1, "{m:?}");
-        }
     }
 }

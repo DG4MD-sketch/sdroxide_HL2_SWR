@@ -1029,14 +1029,18 @@ pub fn decode_q65_slot(
     use mfsk_core::q65::search::SearchParams;
 
     let audio: Vec<f32> = audio_12k.iter().map(|&s| f32::from(s) / 28_000.0).collect();
-    // Q65 keys one second into the slot; the scan searches around that, and
-    // its own asymmetric `SearchParams` window carries the tolerance.
-    const NOMINAL_START: usize = 12_000;
+    // The scan searches around where this sub-mode keys — half a second in for
+    // 15A and 30A, one second for the rest — and its own asymmetric
+    // `SearchParams` window carries the tolerance. mfsk-core reports each
+    // frame's start from the start of the buffer, so the nominal start comes
+    // off it to give WSJT-X's DT.
+    let nominal_start = (mode.start_delay_s() * f64::from(DECODE_RATE_U32)).round() as usize;
+    let nominal_s = mode.start_delay_s() as f32;
     let params = SearchParams::default();
 
     macro_rules! run {
         ($p:ty) => {
-            DecodeRequest::<$p>::new(&audio, DECODE_RATE_U32, NOMINAL_START, params)
+            DecodeRequest::<$p>::new(&audio, DECODE_RATE_U32, nominal_start, params)
                 .decode()
                 .into_iter()
                 .map(|r| {
@@ -1044,7 +1048,7 @@ pub fn decode_q65_slot(
                     Decode {
                         slot_utc,
                         snr_db: r.snr_db.round() as i16,
-                        dt: r.dt_sec,
+                        dt: r.dt_sec - nominal_s,
                         audio_hz: r.freq_hz,
                         message: r.message,
                         to: p.to,
@@ -1606,12 +1610,14 @@ mod tests {
     /// expected whole; the sub-mode decides both the slot the audio is padded
     /// into and the protocol type the decode is run as.
     ///
-    /// `#[ignore]`d because a Q65 scan is tens of seconds of work even at the
-    /// short sub-modes, and a 300 s slot is a minute of decode on its own; run
-    /// it with `cargo test -p sdroxide-digi --release -- --ignored q65`. The
-    /// cheapest sub-mode has its own unignored smoke test below.
+    /// `#[ignore]`d because the ten scans take about 20 s in a test build,
+    /// most of it the long sub-modes; run it with
+    /// `cargo test -p sdroxide-digi --lib -- --ignored q65`. The cheapest
+    /// sub-mode has its own unignored smoke test below, and
+    /// `q65_sub_modes_match_mfsk_cores_geometry` checks every sub-mode's
+    /// mapping on every run.
     #[test]
-    #[ignore = "Q65 scans are slow; run with --release -- --ignored"]
+    #[ignore = "Q65 scans take ~20 s; run with -- --ignored"]
     fn q65_messages_round_trip_at_every_sub_mode() {
         use sdroxide_types::Q65Mode;
 
@@ -1635,7 +1641,7 @@ mod tests {
     }
 
     /// Synthesize a `CQ K1ABC FN42` at sub-mode `m`, pad it into a whole slot at
-    /// the one-second TX offset, and assert it decodes back.
+    /// the sub-mode's own TX offset, and assert it decodes back on time.
     fn q65_round_trip<P: mfsk_core::engine::ModulationParams>(m: sdroxide_types::Q65Mode) {
         let burst = mfsk_core::q65::tx::synthesize_standard_for::<P>(
             "CQ", "K1ABC", "FN42", 12_000, 1000.0, 0.3,
@@ -1653,6 +1659,37 @@ mod tests {
             .unwrap_or_else(|| panic!("Q65-{}: nothing decoded: {decodes:?}", m.label()));
         assert!(best.is_cq, "Q65-{}: {decodes:?}", m.label());
         assert_eq!(best.grid.as_deref(), Some("FN42"), "Q65-{}", m.label());
+        // mfsk-core places a frame to a fraction of a symbol, and the long
+        // sub-modes' symbols are long: 120D reads a third of a second early and
+        // 300A (3.5 s symbols) a whole second. "On time" is to half a symbol
+        // there; the short sub-modes are held to 0.3 s.
+        let half_symbol = m.nsps() as f32 / 12_000.0 / 2.0;
+        assert!(best.dt.abs() <= 0.3f32.max(half_symbol), "Q65-{}: DT {}", m.label(), best.dt);
+    }
+
+    /// `Q65Mode` states each sub-mode's geometry in `sdroxide-types`, which
+    /// cannot depend on mfsk-core; this holds the two together — the slot and
+    /// the symbol length that decide the burst, and so which protocol type a
+    /// sub-mode is decoded as. (The transmit offset is WSJT-X's rather than
+    /// mfsk-core's, which says one second for all of them.)
+    #[test]
+    fn q65_sub_modes_match_mfsk_cores_geometry() {
+        use mfsk_core::engine::{FrameLayout, ModulationParams};
+        use sdroxide_types::Q65Mode;
+        fn check<P: FrameLayout + ModulationParams>(m: Q65Mode) {
+            assert_eq!(m.nsps(), P::NSPS as usize, "Q65-{} NSPS", m.label());
+            assert_eq!(m.slot_s(), f64::from(P::T_SLOT_S), "Q65-{} slot", m.label());
+        }
+        check::<mfsk_core::q65::Q65a15>(Q65Mode::A15);
+        check::<mfsk_core::q65::Q65a30>(Q65Mode::A30);
+        check::<mfsk_core::q65::Q65a60>(Q65Mode::A60);
+        check::<mfsk_core::q65::Q65b60>(Q65Mode::B60);
+        check::<mfsk_core::q65::Q65c60>(Q65Mode::C60);
+        check::<mfsk_core::q65::Q65d60>(Q65Mode::D60);
+        check::<mfsk_core::q65::Q65e60>(Q65Mode::E60);
+        check::<mfsk_core::q65::Q65d120>(Q65Mode::D120);
+        check::<mfsk_core::q65::Q65e120>(Q65Mode::E120);
+        check::<mfsk_core::q65::Q65a300>(Q65Mode::A300);
     }
 
     /// A synthesized FSK441 ping decodes through the modem adapter into a

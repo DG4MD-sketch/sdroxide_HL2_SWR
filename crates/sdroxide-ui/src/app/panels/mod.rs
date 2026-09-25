@@ -1225,11 +1225,11 @@ impl SdroxideApp {
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("Q65").size(11.0).strong().color(crate::theme::CYAN()));
             ui.label(RichText::new("sub-mode").size(10.0).weak());
-            for m in sdroxide_types::Q65Mode::UI_ORDER {
+            for m in sdroxide_types::Q65Mode::ALL {
                 let on = self.digi_cfg_edit.q65_mode == m;
                 if crate::chrome::chip(ui, on, RichText::new(m.label()).size(10.5))
                     .on_hover_text(format!(
-                        "{}-second T/R period, {} s burst",
+                        "{:.0}-second T/R period, {:.1} s burst",
                         m.slot_s(),
                         m.burst_s()
                     ))

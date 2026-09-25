@@ -299,7 +299,8 @@ and it is receive only here.
 
 - The **sub-mode** has two axes: the **T/R period** (15, 30, 60, 120 or 300
   seconds) and the **tone-spacing letter** (A–E, wider for more Doppler
-  spread). **Q65-60A** is the band convention and the default. Both ends of a
+  spread). **Q65-30A** is the default; the 60 s sub-modes are the usual EME
+  choice. Both ends of a
   contact have to agree, so check what the other station is running.
 - Ten sub-modes are wired: 15A, 30A, 60A–60E, 120D, 120E and 300A.
 - A decode is the same `<to> <from> <grid|report>` as FT8/FT4, since Q65
