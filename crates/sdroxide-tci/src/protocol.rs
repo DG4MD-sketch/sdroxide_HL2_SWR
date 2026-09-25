@@ -316,6 +316,8 @@ pub fn mode_to_tci(mode: Mode) -> &'static str {
         | Mode::Wspr
         | Mode::Pi4
         | Mode::Msk144
+        | Mode::Jt65
+        | Mode::Jt9
         | Mode::Ft4
         | Mode::Ft2
         | Mode::Psk

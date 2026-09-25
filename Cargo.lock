@@ -2960,6 +2960,7 @@ dependencies = [
  "num-complex",
  "num-traits",
  "rayon",
+ "realfft",
  "rustfft",
 ]
 

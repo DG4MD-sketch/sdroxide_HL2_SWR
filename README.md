@@ -74,7 +74,9 @@ One binary, three ways to run it:
   variant and tone frequency the network uses), receive-only **MSK144**
   (meteor scatter on 6 m and 2 m — continuous-phase binary MSK in a
   15-second period, the decoder hunting each period for the brief
-  meteor-trail bursts),
+  meteor-trail bursts), receive-only **JT65** and
+  **JT9** (the classic WSJT weak-signal modes — 65-FSK and 9-FSK in a
+  60-second slot, for EME and the weakest HF paths),
   **Hellschreiber** (all seven Feld Hell / FSK Hell variants, on a scrolling
   raster), image **SSTV** (Scottie, Martin, Robot), image **RIFP**
   (draft-dulaunoy-rifp-00 — packetised, checksummed pictures over a 4800-baud
@@ -239,6 +241,26 @@ contacts, and it is receive only here.
 - It carries the same 77-bit message as FT8, so a decode reads the same way.
 - Tune to the meteor-scatter calling frequencies — for example **50.260 MHz**
   on 6 m and **144.200 MHz** on 2 m — and leave the audio cursor alone: the
+  decoder searches the whole audio passband.
+
+## JT65 and JT9
+
+Selecting **JT65** or **JT9** opens the decode list alone: a reception list of
+the stations heard, with time, signal estimate, audio offset and the decoded
+`<to> <from> <grid|report>`. These are the two classic weak-signal modes from
+the WSJT family — JT65 is the EME (moonbounce) mode, and JT9 is its narrower,
+slower sibling for the weakest signals on HF. Both are receive only here.
+
+- Both run on a **60-second slot** and carry a short 72-bit message, so a
+  decode arrives a few seconds after the minute.
+- The **72-bit JT message carries no CRC**: the error correction is a
+  Reed–Solomon code (JT65) or a convolutional one (JT9), and either can
+  converge on a well-formed message that was never sent when the band is
+  empty. The decoder orders what it finds by sync strength and keeps the
+  strongest few; on a real signal the true message is the strong one, but on
+  a dead band do not read a lone weak row as a station.
+- Tune the dial to the band and leave the audio cursor where the signals are —
+  a JT signal is tiny (16 Hz wide for JT9, about 180 Hz for JT65) and the
   decoder searches the whole audio passband.
 
 ## Propagation heat map
