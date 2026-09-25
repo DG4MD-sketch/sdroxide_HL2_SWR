@@ -1487,9 +1487,10 @@ mod tests {
         carrier.truncate(npts);
         let mut slot = Vec::with_capacity(npts);
         for (i, &s) in carrier.iter().enumerate() {
-            let iping = (i / FS as usize).max(1).min(14);
+            let iping = (i / FS as usize).clamp(1, 14);
             let t = (i as f32 / FS - iping as f32) / 0.2;
-            let env = if (0.0..=10.0).contains(&t) { 2.718 * t * (-t).exp() } else { 0.0 };
+            let env =
+                if (0.0..=10.0).contains(&t) { std::f32::consts::E * t * (-t).exp() } else { 0.0 };
             slot.push((s as f32 * env) as i16);
         }
         let decodes = decode_msk144_slot(&slot, 1500.0, 0);

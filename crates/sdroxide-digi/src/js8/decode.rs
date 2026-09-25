@@ -611,7 +611,8 @@ mod tests {
         let speed = Js8Speed::Normal;
         let strong = Js8Payload::from_chars("KM4ACKtestin", 4).expect("packs");
         let weak = Js8Payload::from_chars("HELLOWORLD12", 3).expect("packs");
-        let synths: [(&str, fn(Js8Speed, &[u8], f32, f32) -> Vec<f32>); 2] =
+        type Synth = fn(Js8Speed, &[u8], f32, f32) -> Vec<f32>;
+        let synths: [(&str, Synth); 2] =
             [("CPFSK", modem::synth_cpfsk_for), ("GFSK", modem::synth_gfsk_for)];
         for (name, synth) in synths {
             let st = synth(speed, &modem::frame_tones_for(speed, strong), 1500.0, 0.5);
