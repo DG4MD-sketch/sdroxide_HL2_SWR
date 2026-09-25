@@ -927,13 +927,13 @@ pub const MSK144_TOLERANCE_HZ: f32 = 200.0;
 ///
 /// Unlike every other mode here, mfsk-core resolves the message text inside
 /// the decode call, so there are no raw 77 bits for us to unpack: the text is
-/// already a `String` and goes through the same parser an FT8 decode does.
+/// already a `String`, and [`parse_text_decode`] reads it.
 pub fn decode_msk144_slot(audio_12k: &[i16], audio_hz: f32, slot_utc: i64) -> Vec<Decode> {
     use mfsk_core::msk144::decode::{Depth, decode_slot};
     decode_slot(audio_12k, audio_hz, MSK144_TOLERANCE_HZ, Depth::Deep)
         .into_iter()
         .map(|r| {
-            let p = parse_message(&r.message, MsgKind::Standard);
+            let p = parse_text_decode(&r.message);
             Decode {
                 slot_utc,
                 snr_db: r.snr_db as i16,
@@ -945,7 +945,7 @@ pub fn decode_msk144_slot(audio_12k: &[i16], audio_hz: f32, slot_utc: i64) -> Ve
                 grid: p.grid,
                 is_cq: p.is_cq,
                 cq_to: p.cq_to,
-                free_text: false,
+                free_text: p.free_text,
                 rr73_to: None,
             }
         })
@@ -1044,7 +1044,7 @@ pub fn decode_q65_slot(
                 .decode()
                 .into_iter()
                 .map(|r| {
-                    let p = parse_message(&r.message, MsgKind::Standard);
+                    let p = parse_text_decode(&r.message);
                     Decode {
                         slot_utc,
                         snr_db: r.snr_db.round() as i16,
@@ -1056,7 +1056,7 @@ pub fn decode_q65_slot(
                         grid: p.grid,
                         is_cq: p.is_cq,
                         cq_to: p.cq_to,
-                        free_text: false,
+                        free_text: p.free_text,
                         rr73_to: None,
                     }
                 })
@@ -1094,7 +1094,7 @@ pub fn decode_fsk441_slot(audio: &[f32], slot_utc: i64) -> Vec<Decode> {
     sdroxide_dsp::fsk441_find_pings(audio)
         .into_iter()
         .map(|p| {
-            let parsed = parse_message(&p.text, MsgKind::Standard);
+            let parsed = parse_text_decode(&p.text);
             Decode {
                 slot_utc,
                 snr_db: p.snr_db.round() as i16,
@@ -1168,6 +1168,26 @@ struct Parsed {
 /// decorations are stripped, so the shared tail handles them all; the kind
 /// (from the type bits, never guessed from the text) decides which decorations
 /// to strip and whether there is any addressing at all.
+/// Addressing for a decode that arrives as text alone.
+///
+/// MSK144 and Q65 come back from mfsk-core already unpacked, and FSK441 is
+/// plain text by design, so there are no message-type bits to say whether a
+/// row is a standard `<to> <from> <grid|report>` or free text. It is read as a
+/// standard message and kept as one only when the calls it names look like
+/// callsigns; anything else is free text and names nobody. Without that,
+/// `TNX 73 GL` reads as a message from "73", which goes on the map and to PSK
+/// Reporter as a station heard.
+fn parse_text_decode(text: &str) -> Parsed {
+    let p = parse_message(text, MsgKind::Standard);
+    // An unresolved hashed call (`<...>`) is already `None` here.
+    let names_a_station = |c: &Option<String>| c.as_deref().is_none_or(is_callish);
+    if names_a_station(&p.to) && names_a_station(&p.from) {
+        p
+    } else {
+        Parsed { free_text: true, ..Default::default() }
+    }
+}
+
 fn parse_message(text: &str, kind: MsgKind) -> Parsed {
     // Free text carries no addressing, however much it may look like it does.
     if kind == MsgKind::FreeText {
@@ -1542,6 +1562,27 @@ mod tests {
                 assert!(decodes.is_empty(), "{mode:?} seed {seed}: noise decoded as {decodes:?}");
             }
         }
+    }
+
+    /// A text-only decode (MSK144, Q65, FSK441) is addressed only when its
+    /// calls look like callsigns: free text names nobody, so it never reaches
+    /// the map or PSK Reporter as a station heard.
+    #[test]
+    fn free_text_names_no_station() {
+        for text in ["TNX 73 GL", "PSE QSL", "RRR", "73", "K1ABC TNX"] {
+            let p = parse_text_decode(text);
+            assert!(p.free_text && p.from.is_none() && p.to.is_none(), "{text}: {p:?}");
+        }
+        let p = parse_text_decode("K1ABC W9XYZ EN37");
+        assert!(!p.free_text);
+        assert_eq!((p.to.as_deref(), p.from.as_deref()), (Some("K1ABC"), Some("W9XYZ")));
+        let p = parse_text_decode("CQ K1ABC FN42");
+        assert!(p.is_cq && !p.free_text);
+        assert_eq!(p.from.as_deref(), Some("K1ABC"));
+        // An unresolved hashed call is not a reason to call the row free text.
+        let p = parse_text_decode("<...> W9XYZ R-05");
+        assert!(!p.free_text);
+        assert_eq!(p.from.as_deref(), Some("W9XYZ"));
     }
 
     /// `Fst4Period` states FST4's geometry in `sdroxide-types`, which cannot

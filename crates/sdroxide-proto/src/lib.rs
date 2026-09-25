@@ -2655,6 +2655,39 @@ mod tests {
         assert_eq!(s.config.tx_level_for(Mode::Psk), 1.0);
     }
 
+    /// The settings the slotted weak-signal modes keep in `DigiConfig` — FST4's
+    /// period, Q65's sub-mode, FSK441's period — cross the wire at values other
+    /// than their defaults, as do the modes themselves. A field appended in the
+    /// wrong place, or a `Mode` discriminant that moved, decodes into the wrong
+    /// setting rather than failing; only a non-default value shows it.
+    #[test]
+    fn roundtrip_weak_signal_mode_settings() {
+        use sdroxide_types::{DigiConfig, Fsk441Period, Fst4Period, Mode, Q65Mode};
+
+        let cfg = DigiConfig {
+            my_call: "OE1XYZ".into(),
+            fst4_period: Fst4Period::P300,
+            q65_mode: Q65Mode::D120,
+            fsk441_period: Fsk441Period::P15,
+            ..DigiConfig::default()
+        };
+        let m = ClientMsg::Command(Command::SetDigiConfig(cfg.clone()));
+        assert_eq!(decode::<ClientMsg>(&encode(&m).unwrap()).unwrap(), m);
+
+        for mode in [Mode::Msk144, Mode::Jt65, Mode::Jt9, Mode::Fst4, Mode::Q65, Mode::Fsk441] {
+            let mut status = DigiStatus::idle(cfg.clone());
+            status.mode = mode;
+            let m = ServerMsg::Ft8Status(status);
+            let back = decode::<ServerMsg>(&encode(&m).unwrap()).unwrap();
+            assert_eq!(back, m, "{mode:?}");
+            let ServerMsg::Ft8Status(s) = back else { panic!("not a status") };
+            assert_eq!(s.mode, mode);
+            assert_eq!(s.config.fst4_period, Fst4Period::P300);
+            assert_eq!(s.config.q65_mode, Q65Mode::D120);
+            assert_eq!(s.config.fsk441_period, Fsk441Period::P15);
+        }
+    }
+
     /// Why HD Radio is greyed out is the station's to say, and it reaches a
     /// remote client on the state, in the connect reply and in every update.
     #[test]

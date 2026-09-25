@@ -443,6 +443,12 @@ impl Mode {
         Mode::Js8,
         Mode::Wspr,
         Mode::Pi4,
+        Mode::Msk144,
+        Mode::Jt65,
+        Mode::Jt9,
+        Mode::Fst4,
+        Mode::Q65,
+        Mode::Fsk441,
         Mode::Psk,
         Mode::Rtty,
         Mode::RttyFm,
@@ -462,12 +468,6 @@ impl Mode {
         Mode::Packet,
         Mode::PacketHf,
         Mode::Aprs,
-        Mode::Msk144,
-        Mode::Jt65,
-        Mode::Jt9,
-        Mode::Fst4,
-        Mode::Q65,
-        Mode::Fsk441,
     ];
 
     /// True for modes that use a dedicated decode/QSO layer over USB.
@@ -667,9 +667,11 @@ impl Mode {
         self == Mode::AtChat
     }
 
-    /// True for the slotted FT8/FT4 modes, as opposed to the continuous
-    /// keyboard modems and the image modes. Drives the decode-list / callsign
-    /// overlays that only make sense for a slot-based decoder.
+    /// True for the slotted modes whose decodes are [`crate::Decode`]s — FT8,
+    /// FT4, FT2 and JS8, and the receive-only MSK144, JT65/JT9, FST4, Q65 and
+    /// FSK441 — as opposed to the continuous keyboard modems and the image
+    /// modes. Drives the decode-list / callsign overlays that only make sense
+    /// for a slot-based decoder.
     ///
     /// WSPR is slotted too and is deliberately *not* here: those overlays are
     /// built from [`crate::Decode`]s, and WSPR produces [`crate::WsprSpot`]s.

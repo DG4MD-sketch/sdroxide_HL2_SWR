@@ -6164,6 +6164,10 @@ impl Engine {
     /// name nobody, and our own callsign is not something we heard.
     fn psk_report_decodes(&self, decodes: &[sdroxide_types::Decode], dial_hz: f64) {
         for d in decodes {
+            // Free text names nobody, whatever its first words look like.
+            if d.free_text {
+                continue;
+            }
             let Some(call) = d.from.as_deref().filter(|c| !c.is_empty()) else { continue };
             self.psk_report_heard(
                 call,
@@ -6377,15 +6381,17 @@ impl Engine {
             de_grid: s.config.my_grid.clone(),
             dx_grid: s.dx_grid.clone().unwrap_or_default(),
             tx_watchdog: s.tx_watchdog,
-            // JS8's period is a runtime setting rather than implied by the
-            // mode, so it has to come from the status rather than a constant.
+            // The WSJT-X UDP Status message carries the period as whole
+            // seconds, so FT4's 7.5 goes out as 7 and FT2's 3.75 as 3. JS8's
+            // speed and the FST4, Q65 and FSK441 periods are settings rather
+            // than implied by the mode, so those come from the status; every
+            // other slotted mode states its own.
             tr_period_s: match s.mode {
-                sdroxide_types::Mode::Ft4 => 7,
-                // The WSJT-X UDP Status message carries the period as whole
-                // seconds, so FT4's 7.5 goes out as 7 and FT2's 3.75 as 3.
-                sdroxide_types::Mode::Ft2 => 3,
                 sdroxide_types::Mode::Js8 => s.js8.as_ref().map_or(15, |j| j.speed.slot_s() as u32),
-                _ => 15,
+                sdroxide_types::Mode::Fst4 => s.config.fst4_period.slot_s() as u32,
+                sdroxide_types::Mode::Q65 => s.config.q65_mode.slot_s() as u32,
+                sdroxide_types::Mode::Fsk441 => s.config.fsk441_period.slot_s() as u32,
+                mode => mode.slot_timing().map_or(15, |t| t.slot_s as u32),
             },
             tx_message: s.tx_pending_msg.clone().unwrap_or_default(),
         });
@@ -12685,9 +12691,10 @@ impl Engine {
         if rx != RxId::Main || self.state.rx[0].mode == mode {
             return None;
         }
-        // `is_slotted` is FT8/FT4/FT2/JS8. WSPR is slotted too and is kept out
-        // of that predicate for reasons of its own (see its docs), but it is a
-        // one-frequency-per-band mode by exactly the same argument.
+        // `is_slotted` is the modes whose decodes are `Decode`s (see its
+        // docs). WSPR is slotted too and is kept out of that predicate for
+        // reasons of its own, but it is a one-frequency-per-band mode by
+        // exactly the same argument.
         if !(mode.is_slotted() || mode.is_wspr()) {
             return None;
         }

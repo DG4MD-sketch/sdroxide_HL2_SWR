@@ -53,6 +53,11 @@ impl SdroxideApp {
     /// row moves the TX audio frequency to that signal; REPLY starts a QSO.
     pub(in crate::app) fn decode_list(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<Command>) {
         let phone = crate::layout::tier(ui.ctx()) == crate::layout::Tier::Phone;
+        // A receive-only mode (MSK144, JT65/JT9, FST4, Q65, FSK441) shares this
+        // list but has no sequencer behind it, so nothing here that would
+        // answer, queue or place a transmission is drawn: a REPLY that does
+        // nothing is worse than no REPLY.
+        let rx_only_mode = self.state.rx[0].mode.is_rx_only();
         // The tab row above already says which view this is and how many
         // stations came in; a second header would be a row of a phone's screen
         // spent repeating it.
@@ -193,7 +198,7 @@ impl SdroxideApp {
             // Whether the engine chooses our transmit frequency. Here rather
             // than in the setup window because it decides what clicking a
             // decode in this list does.
-            if self.digi_cfg_seeded {
+            if self.digi_cfg_seeded && !rx_only_mode {
                 let held = self.digi_cfg_edit.hold_tx_freq;
                 let auto = self.digi_cfg_edit.auto_tx_freq;
                 // Greyed while held, because held wins: leaving it live would
@@ -669,6 +674,9 @@ impl SdroxideApp {
                     // transmit, and a list of stations you cannot work should
                     // say so on the row rather than only when the key fails.
                     let buttons = |ui: &mut egui::Ui| {
+                        if rx_only_mode {
+                            return None;
+                        }
                         let resp = tx_gated(ui, tx_ok, |ui| {
                             crate::chrome::chip_accent(
                                 ui,
@@ -696,7 +704,7 @@ impl SdroxideApp {
                                 "Work this station after the current one"
                             })
                         });
-                        (resp, qresp)
+                        Some((resp, qresp))
                     };
 
                     let inner = egui::Frame::new()
@@ -732,11 +740,12 @@ impl SdroxideApp {
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
-                                            let (resp, qresp) = buttons(ui);
-                                            reply = resp.clicked();
-                                            queue = qresp.clicked();
-                                            reply_left =
-                                                Some(resp.rect.left().min(qresp.rect.left()));
+                                            if let Some((resp, qresp)) = buttons(ui) {
+                                                reply = resp.clicked();
+                                                queue = qresp.clicked();
+                                                reply_left =
+                                                    Some(resp.rect.left().min(qresp.rect.left()));
+                                            }
                                             ui.with_layout(
                                                 egui::Layout::left_to_right(egui::Align::Center),
                                                 |ui| {
@@ -818,11 +827,12 @@ impl SdroxideApp {
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
-                                            let (resp, qresp) = buttons(ui);
-                                            reply = resp.clicked();
-                                            queue = qresp.clicked();
-                                            reply_left =
-                                                Some(resp.rect.left().min(qresp.rect.left()));
+                                            if let Some((resp, qresp)) = buttons(ui) {
+                                                reply = resp.clicked();
+                                                queue = qresp.clicked();
+                                                reply_left =
+                                                    Some(resp.rect.left().min(qresp.rect.left()));
+                                            }
                                             ui.with_layout(
                                                 egui::Layout::left_to_right(egui::Align::Center),
                                                 |ui| {

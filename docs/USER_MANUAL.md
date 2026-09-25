@@ -326,7 +326,7 @@ popup with three rows:
   has a standard calling frequency carry a cyan underline; see
   [§3.1](#31-general-considerations).
 - **MODE:** `LSB USB CW AM SAM NFM WFM DRM HD DIGU DIGL DSB ISB SPEC`.
-- **DIGITAL:** `FT8 FT4 MSK144 JT65 JT9 FST4 Q65 FSK441 PSK RTTY RTTY-FM OLIVIA THOR FSQ HELL SSTV SSTV-FM NAVTEX RIFP RFPAINT RADE` (see
+- **DIGITAL:** `FT8 FT4 FT2 JS8 WSPR PI4 MSK144 JT65 JT9 FST4 Q65 FSK441 PSK RTTY RTTY-FM OLIVIA THOR FSQ ATCHAT HELL SSTV SSTV-FM RIFP WEFAX NAVTEX ACARS RFPAINT RADE PACKET PACKET-HF APRS ADS-B VDL2 AIS HFDL` (see
   [Digital modes](#3-digital-modes)).
 
 ![The band and mode selector popup](images/04-band-mode-popup.jpg)
@@ -16043,6 +16043,10 @@ using. Bind them under **Speech** on the Controls tab:
 | JS8 | JS8 — conversational messaging on FT8's waveform. Four speeds (Normal 15 s / Fast 10 s / Turbo 6 s / Slow 30 s); directed queries, heartbeats and multi-frame free text. |
 | WSPR | Weak Signal Propagation Reporter — a two-minute beacon carrying a callsign, grid and power. Not a QSO mode: it measures paths, uploads them to WSPRnet, and feeds the propagation heat map. See [3.11](#311-wspr-weak-signal-propagation-reporter). |
 | PI4 | "Next Generation Beacon" — a one-minute four-tone FSK beacon carrying a callsign. Receive only. Not a QSO mode: it measures paths, and carries no grid to feed the propagation heat map with. See [3.20](#320-pi4-next-generation-beacon). |
+| MSK144 | Meteor scatter on 6 m and 2 m: continuous-phase MSK at 2000 baud carrying FT8's 77-bit message in a 15-second period, the decoder hunting each period for meteor-trail bursts around the audio cursor. Receive only. See [3.21](#321-msk144). |
+| JT65 / JT9 | The classic WSJT weak-signal modes in a 60-second slot: JT65A (65-FSK, Reed–Solomon) and JT9 (9-FSK, 16 Hz wide), with the short 72-bit JT message. Receive only. See [3.22](#322-jt65-and-jt9). |
+| FST4 | The slow weak-signal mode for EME, troposcatter and LF/MF, at a chosen 15/30/60/120/300-second period, with FT8's 77-bit message. Receive only. See [3.23](#323-fst4). |
+| Q65 | WSJT-X's modern weak-signal mode for EME and scatter paths: ten sub-modes (period and tone spacing), FT8's 77-bit message and a CRC. Receive only. See [3.24](#324-q65). |
 | FSK441 | The original meteor-scatter mode on 6 m and 2 m: 4-FSK at 441 baud carrying free text and the `R26`/`R27`/`RRR`/`73` single-tone shorthand, in a 15/30-second period. The decoder hunts the period for meteor-trail pings. Receive only. See [3.25](#325-fsk441). |
 | PSK | PSK31 keyboard mode (BPSK31 / varicode). |
 | RTTY | RTTY keyboard mode (Baudot; selectable shift and baud), on a sideband. |
