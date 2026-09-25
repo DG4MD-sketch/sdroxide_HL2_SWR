@@ -6024,10 +6024,19 @@ which lasts from a few milliseconds to a few hundred. It is the classic way to
 work 6 m and 2 m "meteor scatter", and it carries plain text rather than the
 77-bit message the newer modes use.
 
-**Where it is.** 6 m and 2 m, on the meteor-scatter calling frequencies — for
-example **50.260 MHz** on 6 m and **144.200 MHz** on 2 m. The four tones sit
-882–2205 Hz above the dial; leave the audio cursor alone, because the decoder
-searches the whole passband.
+**Where it is.** 6 m and 2 m, in the meteor-scatter segments of the band plan.
+MSK144 has largely replaced it, so there is little of it on the air; look where
+the station you want to hear says it will be. The four tones sit at 882, 1323,
+1764 and 2205 Hz above the dial, as every FSK441 station sends them, and the
+decoder looks for them there, allowing 200 Hz of mistuning either way — the
+audio cursor does not move that.
+
+**What it will not report.** A ping is short — a meteor trail lasts well under
+a second, a big one a few. A steady signal lasting longer than about four
+seconds is held to a stricter standard: its tones have to separate cleanly, and
+a single tone is never read as `R26`, `R27`, `RRR` or `73`, because a birdie or
+a neighbour tuning up looks exactly like one. A message heard end to end on a
+direct path still decodes; a carrier does not.
 
 **What you see.** A **DECODES** list. The **DT** is not an offset from a frame
 start — FSK441 has no fixed frame position — but **how far into the period**

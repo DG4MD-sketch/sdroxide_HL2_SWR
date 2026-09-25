@@ -1,3 +1,26 @@
+// Portions of this file are ported from FSK441-PLUS
+// (https://github.com/Nythbran23/FSK441-PLUS), which carries this notice:
+//
+// MIT License — Copyright (c) 2026 Roger Banks GW4WND
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 //! FSK441 — the original high-speed meteor-scatter mode, receive side.
 //!
 //! Four-tone FSK at 441 baud on 882 / 1323 / 1764 / 2205 Hz, carrying the
@@ -57,6 +80,22 @@ const MAX_MSG_CHARS: usize = 46;
 const SPEC_NFFT: usize = 256;
 /// How far off the nominal tones a signal may be and still be read, Hz.
 pub const DEFAULT_DFTOL: f32 = 200.0;
+/// Mean dit confidence a ping must reach. Noise dits average about 0.37, so
+/// this is a gate on a short burst that has already stood 6 dB out of the
+/// floor.
+const PING_MIN_CONFIDENCE: f32 = 0.35;
+/// The longest run the detector reads as a meteor ping, in seconds. Underdense
+/// trails last well under a second and overdense ones a few; a run longer than
+/// this is a signal heard steadily — or a carrier, or noise that filled the
+/// buffer as evenly as a signal would — and is judged by the `STEADY_` gates.
+const LONGEST_PING_S: f32 = 4.0;
+/// Mean dit confidence a steady run must reach. Standing out of the floor is
+/// no evidence for it, so the tones themselves have to separate cleanly, as a
+/// signal heard for seconds on a direct path does.
+const STEADY_MIN_CONFIDENCE: f32 = 0.6;
+/// The largest share of a steady run's dits one tone may carry. FSK441 text
+/// spreads its dits over all four tones; a carrier puts them all on one.
+const STEADY_MAX_TONE_SHARE: f32 = 0.6;
 
 /// One decoded ping.
 #[derive(Debug, Clone, PartialEq)]
@@ -82,7 +121,15 @@ pub struct Fsk441Ping {
 }
 
 /// The dit indices for a character, or `None` if it is not in the alphabet.
+///
+/// Space is `033`. The alphabet has a space in four slots, but three of them
+/// — `000`, `111` and `222` — are the single-tone shorthand's (`R26`, `R27`,
+/// `RRR`), filled with a space only so a decoder reads them as one; K1JT's
+/// definition sends a space as `033`, and so does this.
 pub fn fsk441_char_to_dits(c: char) -> Option<(u8, u8, u8)> {
+    if c == ' ' {
+        return Some((0, 3, 3));
+    }
     let uc = c.to_ascii_uppercase();
     let pos = FSK441_CHARSET.iter().position(|&b| b as char == uc)?;
     Some(((pos / 16) as u8, ((pos / 4) % 4) as u8, (pos % 4) as u8))
@@ -100,7 +147,7 @@ pub fn fsk441_dits_to_char(d0: u8, d1: u8, d2: u8) -> char {
 pub fn fsk441_encode_tones(msg: &str) -> Vec<u8> {
     let mut tones = Vec::with_capacity(msg.len() * 3);
     for c in msg.chars() {
-        let (d0, d1, d2) = fsk441_char_to_dits(c).unwrap_or((0, 0, 0));
+        let (d0, d1, d2) = fsk441_char_to_dits(c).unwrap_or((0, 3, 3));
         tones.push(d0);
         tones.push(d1);
         tones.push(d2);
@@ -212,27 +259,35 @@ fn refine_frequency(data: &[f32], dftol: f32) -> f32 {
     let fac = 1.0 / (100.0 * nfft as f32 * n_windows as f32);
     s.iter_mut().for_each(|x| *x *= fac);
 
-    let nbaud_bins = (FSK441_BAUD / df_bin).round() as i32;
-    let ltone = (FSK441_TONES[0] / FSK441_BAUD) as i32;
-    let tol_bins = (dftol / df_bin).round() as i32;
+    // Each tone is read at its exact frequency, interpolated between bins,
+    // with the offset stepped finer than a bin — so a signal on its nominal
+    // tones refines to zero rather than to whichever bin its tones round to.
+    // The search is the reference's `±dftol` about nominal, no wider: a
+    // window reaching a whole tone spacing down lets three of the four tones
+    // line up one slot low.
     let wgt = [1.0f32, 4.0, 6.0, 4.0, 1.0];
-
+    let bin = |pos: f32| -> f32 {
+        let i0 = pos.floor();
+        let frac = pos - i0;
+        let at = |i: f32| s[(i as i32).clamp(0, nh as i32 - 1) as usize];
+        at(i0) * (1.0 - frac) + at(i0 + 1.0) * frac
+    };
+    const STEP_HZ: f32 = 5.0;
     let mut smax = 0.0f32;
     let mut best_df = 0.0f32;
-    let lo = -(ltone * nbaud_bins);
-    let hi = tol_bins;
-    for offset_bin in lo..=hi {
-        let mut sum = 0.0f32;
-        for tone in 0..4i32 {
-            let centre = (ltone + tone) * nbaud_bins + offset_bin;
-            for (k, &w) in wgt.iter().enumerate() {
-                let bin = (centre - 2 + k as i32).clamp(0, nh as i32 - 1) as usize;
-                sum += w * s[bin];
-            }
-        }
+    let steps = (dftol / STEP_HZ).round() as i32;
+    for k in -steps..=steps {
+        let off = k as f32 * STEP_HZ;
+        let sum: f32 = FSK441_TONES
+            .iter()
+            .map(|&f| {
+                let centre = (f + off) / df_bin;
+                wgt.iter().enumerate().map(|(j, &w)| w * bin(centre + j as f32 - 2.0)).sum::<f32>()
+            })
+            .sum();
         if sum > smax {
             smax = sum;
-            best_df = offset_bin as f32 * df_bin;
+            best_df = off;
         }
     }
     best_df
@@ -342,7 +397,13 @@ fn tone_offset(data: &[f32], dom: usize) -> f32 {
 
 /// Decode one ping's audio into its text, frequency offset and confidence.
 /// `None` when the ping is too short or too unclear to be a real signal.
-fn decode_ping(data: &[f32]) -> Option<(String, f32, f32)> {
+///
+/// `steady` is a run longer than any meteor ping — a signal heard for
+/// seconds on end, or a carrier, or noise. There a single tone is refused,
+/// shorthand included: a steady tone for that long is a birdie or a tune-up as
+/// often as it is `RRR`, and nothing in the audio tells them apart. Text must
+/// use the tones as text does, no one of them carrying most of the dits.
+fn decode_ping(data: &[f32], steady: bool) -> Option<(String, f32, f32)> {
     let npts = data.len().min(FSK441_RATE as usize);
     if npts < FSK441_NSPD * 6 {
         return None;
@@ -357,7 +418,11 @@ fn decode_ping(data: &[f32]) -> Option<(String, f32, f32)> {
     let nominal = extract_dits(&energy_matrix(data, 0.0));
     if nominal.len() >= 8 {
         let (dom, dom_count) = dominant_tone(&nominal);
-        if dom_count as f32 >= 0.9 * nominal.len() as f32 {
+        let share = dom_count as f32 / nominal.len() as f32;
+        if steady && share > STEADY_MAX_TONE_SHARE {
+            return None;
+        }
+        if share >= 0.9 {
             let conf = nominal.iter().map(|d| d.1).sum::<f32>() / nominal.len() as f32;
             return Some((FSK441_SHORTHAND[dom].to_string(), tone_offset(data, dom), conf));
         }
@@ -433,8 +498,8 @@ pub fn fsk441_find_pings(slot: &[f32]) -> Vec<Fsk441Ping> {
     // matched filters. A broadband noise burst raises the raw power but not
     // this, which is what keeps the search from chasing noise.
     let mut tone_env = vec![0.0f32; npts - FSK441_NSPD + 1];
-    for k in 0..4 {
-        let y = detect(slot, FSK441_TONES[k]);
+    for &tone in &FSK441_TONES {
+        let y = detect(slot, tone);
         for (i, &v) in y.iter().enumerate() {
             if v > tone_env[i] {
                 tone_env[i] = v;
@@ -456,16 +521,23 @@ pub fn fsk441_find_pings(slot: &[f32]) -> Vec<Fsk441Ping> {
     if peak <= 1e-30 {
         return Vec::new();
     }
-    // The floor is the quietest block — silence when there is any, and the
-    // deepest fade between passes otherwise. But when even the quietest block
-    // is close to the loudest the buffer is signal from end to end (an operator
-    // transmits the message over and over, and there is no noise in it to
-    // threshold against at all), so the whole buffer is the run: `4 × floor`
-    // would sit above the signal and report nothing. `decode_ping` then reads
-    // the dits and rejects the run if it cannot.
-    let floor = blocks.iter().copied().fold(f32::INFINITY, f32::min);
-    let all_signal = floor > 0.5 * peak;
-    let thresh = if all_signal { 0.0 } else { floor * 4.0 };
+    // The noise floor, from the blocks that carry anything at all: digital
+    // silence (a muted input, a stream that started late) says nothing about
+    // the noise, and a floor taken from it sits at zero and turns everything
+    // after it into one long ping. Of the rest, the tenth percentile — under
+    // the signal even when most of the buffer is signal, which the median is
+    // not, yet not dragged down by one deep fade the way the quietest block
+    // is.
+    let mut live: Vec<f32> = blocks.iter().copied().filter(|&b| b > peak * 1e-6).collect();
+    live.sort_by(f32::total_cmp);
+    let floor = live[live.len() / 10];
+    // When even that is close to the loudest block the buffer is signal from
+    // end to end — an operator transmits the message over and over — and there
+    // is no noise in it to threshold against, so the whole buffer is the run.
+    // Such a run is long, and a long run is judged harder than a ping (see
+    // `LONGEST_PING_S`), since noise and a carrier fill a buffer as evenly.
+    let continuous = floor > 0.5 * peak;
+    let thresh = if continuous { 0.0 } else { floor * 4.0 };
 
     let mut pings = Vec::new();
     let mut b = 0usize;
@@ -490,14 +562,16 @@ pub fn fsk441_find_pings(slot: &[f32]) -> Vec<Fsk441Ping> {
             continue;
         }
         let audio = &slot[start..end];
-        let Some((text, df, confidence)) = decode_ping(audio) else {
+        let steady = audio.len() as f32 / FSK441_RATE as f32 > LONGEST_PING_S;
+        let Some((text, df, confidence)) = decode_ping(audio, steady) else {
             continue;
         };
         // A run that tripped the detector but decoded with poor tone contrast
         // is far more likely to be a noise burst than a signal; the reference
         // leaves this to its QSO layer, but a decode list has nowhere to put
         // the doubt, so drop it here.
-        if confidence < 0.35 {
+        let min_confidence = if steady { STEADY_MIN_CONFIDENCE } else { PING_MIN_CONFIDENCE };
+        if confidence < min_confidence {
             continue;
         }
         let peak = blocks[start_b..end_b].iter().copied().fold(0.0f32, f32::max);
@@ -522,7 +596,7 @@ mod tests {
     /// space and the shorthand tones.
     #[test]
     fn the_alphabet_round_trips() {
-        assert_eq!(fsk441_char_to_dits(' '), Some((0, 0, 0)));
+        assert_eq!(fsk441_char_to_dits(' '), Some((0, 3, 3)), "space is 033, not a shorthand tone");
         assert_eq!(fsk441_char_to_dits('A'), Some((1, 0, 1)));
         assert_eq!(fsk441_char_to_dits('G'), Some((1, 1, 3)));
         assert_eq!(fsk441_char_to_dits('W'), Some((2, 1, 3)));
@@ -542,10 +616,10 @@ mod tests {
     #[test]
     fn the_encoder_emits_three_dits_a_character() {
         assert_eq!(fsk441_encode_tones("G"), vec![1, 1, 3]);
-        assert_eq!(fsk441_encode_tones(" "), vec![0, 0, 0]);
+        assert_eq!(fsk441_encode_tones(" "), vec![0, 3, 3]);
         assert_eq!(fsk441_encode_tones("CQ").len(), 6);
         // A character outside the alphabet becomes a space rather than panicking.
-        assert_eq!(fsk441_encode_tones("~"), vec![0, 0, 0]);
+        assert_eq!(fsk441_encode_tones("~"), vec![0, 3, 3]);
     }
 
     /// A clean single pass of a real message decodes back to itself. This is
@@ -557,7 +631,7 @@ mod tests {
         let tones = fsk441_encode_tones(msg);
         let mut slot = vec![0.0f32; 2205]; // 0.2 s of silence
         slot.extend_from_slice(&fsk441_generate_audio(&tones));
-        slot.extend(std::iter::repeat(0.0).take(2205));
+        slot.extend(std::iter::repeat_n(0.0, 2205));
 
         let pings = fsk441_find_pings(&slot);
         assert_eq!(pings.len(), 1, "one ping expected, got {pings:?}");
@@ -565,6 +639,9 @@ mod tests {
         assert!(pings[0].confidence > 0.9, "clean signal should be confident");
         // The ping starts where the signal does, within a block.
         assert!((pings[0].start_s - 0.2).abs() < 0.05, "start {}", pings[0].start_s);
+        // On its nominal tones, it refines to no offset — not to whichever
+        // spectrum bin the tones happen to round to.
+        assert!(pings[0].df_hz.abs() <= 10.0, "df {}", pings[0].df_hz);
     }
 
     /// A mistuned signal is still found and decoded: the frequency refine has
@@ -590,7 +667,7 @@ mod tests {
         }
         let mut slot = vec![0.0f32; 2205];
         slot.extend_from_slice(&audio);
-        slot.extend(std::iter::repeat(0.0).take(2205));
+        slot.extend(std::iter::repeat_n(0.0, 2205));
 
         let pings = fsk441_find_pings(&slot);
         assert_eq!(pings.len(), 1, "{pings:?}");
@@ -606,7 +683,7 @@ mod tests {
             let tones = vec![tone as u8; 30];
             let mut slot = vec![0.0f32; 2205];
             slot.extend_from_slice(&fsk441_generate_audio(&tones));
-            slot.extend(std::iter::repeat(0.0).take(2205));
+            slot.extend(std::iter::repeat_n(0.0, 2205));
             let pings = fsk441_find_pings(&slot);
             assert_eq!(pings.len(), 1, "tone {tone}: {pings:?}");
             assert_eq!(pings[0].text, want, "tone {tone}");
@@ -671,13 +748,111 @@ mod tests {
         );
     }
 
+    /// Deterministic white noise at `amp`, for the false-decode tests.
+    fn noise(len: usize, amp: f32, seed: u32) -> Vec<f32> {
+        let mut state = seed.wrapping_mul(0x9e37_79b9) | 1;
+        (0..len)
+            .map(|_| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                ((state >> 8) as f32 / 8_388_608.0 - 1.0) * amp
+            })
+            .collect()
+    }
+
+    /// A steady carrier — a birdie, a neighbour's tune-up — held through a
+    /// whole slot is not a message. On one of the four tones it is exactly the
+    /// shape of the single-tone shorthand, and a false `RRR` or `73` is the
+    /// worst decode this mode can make, since those finish a contact.
+    #[test]
+    fn a_steady_carrier_is_not_shorthand() {
+        let n = 30 * FSK441_RATE as usize;
+        for hz in [882.0f32, 1000.0, 1323.0, 1764.0, 2205.0, 2300.0] {
+            let w = TAU * hz / FSK441_RATE as f32;
+            let mut slot = noise(n, 0.1, hz as u32);
+            for (i, s) in slot.iter_mut().enumerate() {
+                *s += 0.5 * (w * i as f32).sin();
+            }
+            let pings = fsk441_find_pings(&slot);
+            assert!(pings.is_empty(), "a {hz} Hz carrier decoded as {pings:?}");
+        }
+    }
+
+    /// A carrier for part of the slot — a neighbour tuning up for ten seconds
+    /// on the `RRR` tone — is not shorthand either: it stands out of the noise
+    /// as a ping does, but for longer than any meteor trail lasts.
+    #[test]
+    fn a_tune_up_carrier_is_not_shorthand() {
+        let rate = FSK441_RATE as usize;
+        let w = TAU * FSK441_TONES[2] / FSK441_RATE as f32;
+        let mut slot = noise(30 * rate, 0.1, 5);
+        for (i, s) in slot.iter_mut().enumerate().skip(5 * rate).take(10 * rate) {
+            *s += 0.5 * (w * i as f32).sin();
+        }
+        let pings = fsk441_find_pings(&slot);
+        assert!(pings.is_empty(), "a tune-up decoded as {pings:?}");
+    }
+
+    /// A stretch of digital silence (a muted input, a stream that started late)
+    /// does not drag the noise floor to zero and turn the noise after it into a
+    /// ping.
+    #[test]
+    fn noise_after_silence_does_not_decode() {
+        let rate = FSK441_RATE as usize;
+        let mut slot = vec![0.0f32; 10 * rate];
+        slot.extend(noise(20 * rate, 0.5, 7));
+        let pings = fsk441_find_pings(&slot);
+        assert!(pings.is_empty(), "noise after silence decoded as {pings:?}");
+    }
+
+    /// Whole slots of plain noise, many of them: a gate that lets a few percent
+    /// of slots through is a false decode every few minutes on an empty band.
+    #[test]
+    fn slots_of_noise_do_not_decode() {
+        let n = 30 * FSK441_RATE as usize;
+        for seed in 1..=40 {
+            let pings = fsk441_find_pings(&noise(n, 0.5, seed));
+            assert!(pings.is_empty(), "seed {seed}: noise decoded as {pings:?}");
+        }
+    }
+
+    /// A message repeated end to end through a whole slot, under noise, still
+    /// decodes — the case a noise floor taken from the signal itself misses.
+    #[test]
+    fn a_continuous_message_under_noise_decodes() {
+        let msg = "W1ABC W9XYZ FN42";
+        let pass = fsk441_generate_audio(&fsk441_encode_tones(msg));
+        let n = 30 * FSK441_RATE as usize;
+        let mut slot = noise(n, 0.3, 11);
+        for (i, s) in slot.iter_mut().enumerate() {
+            *s += pass[i % pass.len()];
+        }
+        let pings = fsk441_find_pings(&slot);
+        assert!(pings.iter().any(|p| p.text.contains("W1ABC")), "not decoded: {pings:?}");
+    }
+
+    /// A message that starts part-way through the slot — noise, then the
+    /// signal to the end — decodes: most of the buffer is signal, so neither
+    /// the median nor the quietest block alone is the floor to judge it by.
+    #[test]
+    fn a_message_starting_mid_slot_decodes() {
+        let msg = "W1ABC W9XYZ FN42";
+        let pass = fsk441_generate_audio(&fsk441_encode_tones(msg));
+        let rate = FSK441_RATE as usize;
+        let mut slot = noise(30 * rate, 0.1, 13);
+        for (i, s) in slot.iter_mut().enumerate().skip(8 * rate) {
+            *s += pass[(i - 8 * rate) % pass.len()];
+        }
+        let pings = fsk441_find_pings(&slot);
+        assert!(pings.iter().any(|p| p.text.contains("W1ABC")), "not decoded: {pings:?}");
+    }
+
     /// The text out of a very short fragment is a fragment, not a crash: the
     /// decoder must return what it can and never panic on partial dits.
     #[test]
     fn a_fragment_decodes_without_panicking() {
         let tones = fsk441_encode_tones("W1ABC");
         let audio = fsk441_generate_audio(&tones);
-        let _ = decode_ping(&audio[..audio.len() / 2]);
+        let _ = decode_ping(&audio[..audio.len() / 2], false);
         let _ = fsk441_find_pings(&audio);
     }
 
